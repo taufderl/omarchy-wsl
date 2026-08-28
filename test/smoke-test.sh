@@ -34,11 +34,15 @@ case "$mode" in
     if grep -q '^systemd=true' "$target/etc/wsl.conf" 2>/dev/null; then ok; else bad "missing/wrong wsl.conf"; fi
 
     check "first-boot provisioning armed"
+    # Triggered from root's shell startup (wsl/arm-first-boot.sh), not a
+    # systemd unit — see docs/install-audit.md for why a TTYPath=/dev/tty1
+    # service didn't work under WSL2 (killed by its own TTYVHangup=yes).
     if [[ -f "$target/var/lib/omarchy/provisioning/pending" ]] && \
-       [[ -L "$target/etc/systemd/system/multi-user.target.wants/omarchy-wsl-provision-owner.service" ]]; then
+       [[ -x "$target/usr/local/bin/omarchy-wsl-provision-owner" ]] && \
+       grep -q 'omarchy-wsl-provision-owner' "$target/root/.bashrc" 2>/dev/null; then
       ok
     else
-      bad "provisioning sentinel or enabled-unit symlink missing"
+      bad "provisioning sentinel, driver script, or root .bashrc hook missing"
     fi
 
     check "every manifest package is actually satisfied in the target"

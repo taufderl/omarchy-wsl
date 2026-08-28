@@ -19,7 +19,7 @@ This is the honest answer to "is it exactly like a real install" — read this b
 | Plymouth boot splash | Not applicable — there is no framebuffer boot sequence to splash on |
 | SDDM login greeter | Not installed/enabled — you're already authenticated as your Windows user; there's no physical display for a greeter to own |
 | Hyprland owns the display via DRM/KMS | **Not present in v1.** WSL2 has no real DRM/KMS device (see [Why no GUI in v1](#why-no-gui-in-v1)) |
-| Interactive first-boot "machine owner" setup (`omarchy-provision-owner`) | A WSL-native equivalent first-boot flow (adapted from Omarchy's own `setup-form.sh`) asks the same questions, gated on first `systemd` boot instead of the ISO installer |
+| Interactive first-boot "machine owner" setup (`omarchy-provision-owner`) | A WSL-native equivalent (adapted from Omarchy's own `setup-form.sh`) asks the same questions, triggered from your very first interactive shell in the imported instance instead of the ISO installer |
 | NetworkManager manages a real NIC, ufw firewalls it | WSL2's own virtual networking (host-managed NAT) is used instead; NetworkManager/ufw are not enabled by default |
 | Bluetooth, brightness, battery, fingerprint, hybrid-GPU switching | Not applicable — none of this hardware exists under WSL2; the relevant Omarchy scripts are skipped, not force-run against nothing |
 
@@ -53,7 +53,7 @@ wsl --import Omarchy $env:LOCALAPPDATA\Omarchy dist\omarchy-wsl.tar.gz
 wsl -d Omarchy
 ```
 
-On first launch, a first-boot service asks for a username, password, hostname, and timezone (the WSL-native equivalent of Omarchy's real owner-setup flow), then sets that user as the WSL default. **You'll need to restart the WSL instance once** (`wsl --terminate Omarchy`, then `wsl -d Omarchy` again) for the new default user to take effect — this is a WSL platform quirk (the default user is fixed at instance start), not a bug in this project.
+On first launch, you'll be asked for a username, password, hostname, and timezone (the WSL-native equivalent of Omarchy's real owner-setup flow), then that user is set as the WSL default. **You'll need to restart the WSL instance once** (`wsl --terminate Omarchy`, then `wsl -d Omarchy` again) for the new default user to take effect — this is a WSL platform quirk (the default user is fixed at instance start), not a bug in this project.
 
 ## Project layout
 
@@ -61,7 +61,7 @@ On first launch, a first-boot service asks for a username, password, hostname, a
 build/     the containerized build pipeline (pacstrap → chroot → adapted install scripts → WSL integration → tarball)
 packages/  the curated package manifest, diffed against upstream Omarchy on every rebuild
 patches/   the audited, adapted subset of basecamp/omarchy's install/*.sh, with a keep/guard/skip decision per script
-wsl/       the WSL-integration layer that has no Omarchy analogue (wsl.conf, first-boot owner service, hook masking)
+wsl/       the WSL-integration layer that has no Omarchy analogue (wsl.conf, first-boot owner provisioning, service enablement)
 test/      the post-build verification/smoke-test suite
 docs/      design notes, including the full install-script audit table
 PLAN.md    the detailed build design and phase plan

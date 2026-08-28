@@ -69,6 +69,22 @@ log "pacstrap: installing $(wc -l < "$GENERATED/manifest.txt") packages into $TA
 pacstrap -c "$TARGET" $(cat "$GENERATED/manifest.txt")
 
 # ---------------------------------------------------------------------------
+# 3b. Generate a locale. Base Arch installs don't ship one pre-generated —
+#     normally archinstall's base setup handles this (same gap category as
+#     sudo/openssh below), and we found out the hard way: a real `wsl -d`
+#     session came up with
+#     `setlocale: LC_CTYPE: cannot change locale (en_US.UTF-8): No such file
+#     or directory` because /etc/locale.gen had en_US.UTF-8 commented out and
+#     locale-gen was never run. en_US.UTF-8 specifically because that's what
+#     WSL itself passes through as $LANG — a user on a different Windows
+#     locale can add their own to /etc/locale.gen and re-run locale-gen.
+# ---------------------------------------------------------------------------
+log "Generating en_US.UTF-8 locale"
+sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' "$TARGET/etc/locale.gen"
+arch-chroot "$TARGET" locale-gen
+echo "LANG=en_US.UTF-8" > "$TARGET/etc/locale.conf"
+
+# ---------------------------------------------------------------------------
 # 4. Restore the real (non-bootstrap) pacman.conf/mirrorlist into the target,
 #    same as upstream's own install/post-install/pacman.sh does — minus its
 #    trailing `source install/hardware/pacman.sh` call, which we skip (T2
