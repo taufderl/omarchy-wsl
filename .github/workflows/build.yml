@@ -1,0 +1,53 @@
+name: Build omarchy-v1.wsl
+
+# Manual only, deliberately: this pins/pulls real omarchy-org packages and
+# produces a multi-GB artifact, so it shouldn't fire on every push while the
+# builder is still under active development. Run it from the Actions tab
+# ("Run workflow") when you actually want a CI-built artifact.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub-hosted runners have ~14 GB free by default. This build pulls
+      # the archlinux:latest image, ~1GB+ of real omarchy packages, and then
+      # writes out the uncompressed target plus two ~3GB copies of the final
+      # artifact (.tar.gz and .wsl) — comfortably over that without some
+      # headroom. Reclaim space from large preinstalled toolchains this repo
+      # never uses, rather than touching build/build.sh itself.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            "${AGENT_TOOLSDIRECTORY:-}" || true
+          docker image prune -af || true
+          df -h /
+
+      # build/build.sh is run completely unmodified — same script, same
+      # container, same output, as a local build. See PLAN.md/README.md for
+      # what it actually does.
+      - name: Build
+        run: ./build/build.sh
+
+      - name: Show build manifest
+        run: cat dist/build-manifest.json
+
+      # Only the .wsl artifact (the supported install path — see README.md)
+      # plus its checksum and the build manifest. dist/omarchy-v1.tar.gz is
+      # the identical bytes under a different name (kept locally for
+      # debugging) — uploading it too would just double the stored size for
+      # no benefit.
+      - name: Upload omarchy-v1.wsl
+        uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-v1.wsl
+          path: |
+            dist/omarchy-v1.wsl
+            dist/omarchy-v1.wsl.sha256
+            dist/build-manifest.json
+          retention-days: 14
+          if-no-files-found: error

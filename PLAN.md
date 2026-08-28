@@ -4,9 +4,11 @@ This is the contributor-facing build design. Read `README.md` first for the user
 
 ## Implementation status
 
-First-boot provisioning is now triggered via WSL's own official first-run mechanism (`/etc/wsl-distribution.conf`'s `oobe.command`, supported since WSL 2.4.4 — the same one Ubuntu/Debian's WSL distros use), **not** a shell rc-file hook. Three earlier rounds of live-hardware debugging (`.bashrc` inline, `$-`-based, then `PROMPT_COMMAND`-based triggers — each a real, repeatable fix, none reliable end to end) are recorded in `docs/install-audit.md` for the reasoning, but all three are superseded, not layered on top of. `omarchy-provision-owner` itself remains the real, unmodified binary throughout — only *what invokes it* changed.
+First-boot provisioning has gone through four rounds of live-hardware debugging, recorded in full in `docs/install-audit.md`: `.bashrc` inline → `$-`-based guard → `PROMPT_COMMAND`-based trigger (each a real, repeatable fix, none reliable end to end) → `/etc/wsl-distribution.conf`'s `oobe.command` (WSL's own official first-run mechanism, supported since WSL 2.4.4). `omarchy-provision-owner` itself has remained the real, unmodified binary throughout every round — only *what invokes it* changed each time.
 
-One earlier build (using the `PROMPT_COMMAND` trigger) did complete an entire fresh `wsl --import` unattended — real splash, real account creation, all the real per-user setup, correct `/etc/skel` — but a subsequent fully-clean test (full Windows reboot, fresh unregister/import) reproduced the original "straight to a root shell" symptom again, showing the fix wasn't actually reliable. Rebuilt on the `oobe.command` mechanism; **not yet re-verified on real hardware** — that's the next test.
+**The `oobe.command` round also initially failed on a fresh real-hardware test** using `wsl --import` (`wsl --unregister` → Windows reboot → fresh `wsl --import` → `wsl -d omarchy` → straight to a root shell, same as every prior round). Reading Microsoft's own docs directly (not guessing) resolved *why*, decisively: `oobe.command`'s own defining doc ([`build-custom-distro.md`](https://learn.microsoft.com/en-us/windows/wsl/build-custom-distro)) tests and frames it exclusively around the `.wsl`-file / `wsl --install` flow, and Microsoft's doc *specifically for* `wsl --import` ([`use-custom-distro.md`](https://learn.microsoft.com/en/windows/wsl/use-custom-distro)) never mentions `wsl-distribution.conf` or `oobe` at all — instead walking through **manually** creating a user after import as the expected norm. Conclusion: `oobe.command` is part of the modern-distribution-install lifecycle (`wsl --install`/`--from-file`/double-clicking a `.wsl` file), not `wsl --import` — the file being present and correct on the rootfs was never going to be enough, independent of any race-condition/timing issue.
+
+**Confirmed on real hardware**: renaming the same build output to `.wsl` and installing with `wsl --install --from-file` fired `oobe.command` immediately. This is now v1's actual, supported delivery method (see `README.md`'s Quickstart and `ROADMAP.md`) — `wsl --import` is no longer the documented install path for this image. Full writeup: `docs/install-audit.md`'s "Incident #4". Worth keeping in mind regardless: even the "correct," officially-supported flow isn't universally bug-free — `microsoft/WSL#13051` is a currently-open issue where Ubuntu's own official `.wsl`/`wsl --install`-driven distro fails partway through its own `oobe.command` on WSL 2.5.7.0 — so this remains "confirmed working on the tested machine," not "guaranteed on every WSL build."
 
 ## Why this is built the way it is
 
@@ -19,8 +21,8 @@ The fix, confirmed by actually downloading and inspecting the real packages from
 **Goal:** pacstrap the real `omarchy` package plus the ISO's own `omarchy-base.packages`, run the real orchestration scripts already shipped inside that package, and add only what's genuinely inapplicable (kernel/DKMS — structural, not curated) or genuinely new to WSL (the shell-startup provisioning trigger, the `wsl.conf` default-user step). If omarchy ships a new `omarchy-*` tool or a new `install/config/*.sh` script, the next build picks it up automatically — nothing in this repo should need to change for that.
 
 **Non-goals, still holding from the original scope:**
-- No Hyprland/Wayland GUI *session* in v1 (the packages install; nothing launches them — see Roadmap).
-- No self-contained `.wsl` package format yet — plain rootfs tarball for `wsl --import`.
+- No Hyprland desktop *session* in v1 (the packages install; individual GUI apps still launch fine via WSLg's own per-app window integration, no Hyprland involved — see Roadmap).
+- No Store-catalog registration (`wsl --install <name>` without `--from-file`) or custom `.ico`/shortcut polish yet — the build ships a working `.wsl` file for `--from-file`/double-click use, but isn't published/listed anywhere (see Roadmap).
 - No attempt at direct DRM/KMS passthrough for Hyprland (unsupported upstream, per earlier research).
 
 ## Architecture
@@ -36,7 +38,7 @@ The fix, confirmed by actually downloading and inspecting the real packages from
    apply the short, explicit WSL service overrides (disable sddm/cups*/avahi-daemon; mask NetworkManager + Microsoft's WSL-recommended units)
    arm first-boot provisioning: the REAL omarchy-provision-owner, via /etc/wsl-distribution.conf's oobe.command
    verify (wsl/verify-no-boot-artifacts.sh)
-   tar target/ → dist/omarchy-wsl.tar.gz + sha256 + build-manifest.json
+   tar target/ → dist/omarchy-v1.tar.gz, copied to dist/omarchy-v1.wsl (same bytes — the supported artifact; oobe.command only fires via this install path, not `wsl --import`) + sha256s + build-manifest.json
 ```
 
 ### Package resolution (`packages/resolve-packages.sh`)

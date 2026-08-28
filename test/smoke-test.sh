@@ -6,8 +6,8 @@
 #                                      target dir (e.g. right after build.sh,
 #                                      before packaging — or a re-extracted
 #                                      tarball)
-#   ./smoke-test.sh --live            checks run FROM INSIDE the imported WSL2
-#                                      instance itself (`wsl -d Omarchy`, then
+#   ./smoke-test.sh --live            checks run FROM INSIDE the installed WSL2
+#                                      instance itself (`wsl -d omarchy`, then
 #                                      run this there) — the checks that only
 #                                      make sense against a booted, running
 #                                      instance (systemd health, live network

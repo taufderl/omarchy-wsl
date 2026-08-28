@@ -20,4 +20,4 @@ Working conventions for this repo, separate from the project's technical scope (
 
 - Report results plainly: if a build/test fails, say so with the actual output, not a softened summary.
 - If a step was skipped or deferred, say that outright rather than letting it look finished.
-- Don't re-litigate decisions already recorded in `PLAN.md` (e.g. CLI-only v1 scope) — treat them as settled unless the project owner reopens them.
+- Don't re-litigate decisions already recorded in `PLAN.md` (e.g. no-Hyprland-desktop v1 scope) — treat them as settled unless the project owner reopens them.

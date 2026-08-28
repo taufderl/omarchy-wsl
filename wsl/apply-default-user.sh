@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The one genuinely new, WSL-only step after first-boot provisioning: bare
 # metal has no concept of a "default user" for a shell launcher to pick, so
-# there's no upstream equivalent of this file to defer to. Called from the
-# root .bashrc hook (see arm-first-boot.sh) right after the real, unmodified
+# there's no upstream equivalent of this file to defer to. Called from
+# wsl/oobe.sh (WSL's own oobe.command) right after the real, unmodified
 # omarchy-provision-owner exits.
 #
 # Finds the account omarchy-provision-owner just created (the first real,
@@ -10,6 +10,15 @@
 # useradd assigns first on a machine with no prior users) and points
 # /etc/wsl.conf's [user] default= at it. Safe to call repeatedly: a no-op
 # once default= is already set to a real user.
+#
+# This is a defense-in-depth backstop, not the thing that actually gets the
+# user into their new account: /etc/wsl-distribution.conf's own
+# oobe.defaultUid=1000 already makes WSL switch to the new user immediately,
+# in the same session, once oobe.command exits 0 — confirmed on real
+# hardware (no restart needed). wsl.conf's default= just makes that hold
+# true for every later launch too. No user-facing message here: printing a
+# "restart WSL now" banner every first boot was actively wrong/confusing
+# once the immediate-switch path was confirmed working.
 set -euo pipefail
 
 WSL_CONF=/etc/wsl.conf
@@ -25,21 +34,3 @@ if grep -q '^\[user\]' "$WSL_CONF" 2>/dev/null; then
 else
   printf '\n[user]\ndefault=%s\n' "$username" >> "$WSL_CONF"
 fi
-
-cat <<EOF
-
-============================================================
- Restart this WSL instance once for '$username' to become
- the default user (a WSL platform requirement, not a bug).
-
- Use a full shutdown, not just --terminate — on a real test,
- 'wsl --terminate' alone left the instance still starting as
- root; 'wsl --shutdown' (stops the whole WSL VM, forcing a
- fresh re-read of wsl.conf) reliably picked up the new default:
-
-   From Windows/PowerShell:
-     wsl --shutdown
-     wsl -d <distro-name>
-============================================================
-
-EOF

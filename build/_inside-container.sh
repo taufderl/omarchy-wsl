@@ -245,14 +245,27 @@ bash "$REPO/wsl/verify-no-boot-artifacts.sh" "$TARGET"
 log "Cleaning package cache in target (keep the rootfs lean)"
 arch-chroot "$TARGET" pacman -Scc --noconfirm
 
-log "Packaging $TARGET into dist/omarchy-wsl.tar.gz"
+log "Packaging $TARGET into dist/omarchy-v1.tar.gz"
 tar -C "$TARGET" \
   --exclude='./proc/*' --exclude='./sys/*' --exclude='./dev/*' \
   --exclude='./tmp/*' --exclude='./run/*' \
-  -czpf "$DIST/omarchy-wsl.tar.gz" .
+  -czpf "$DIST/omarchy-v1.tar.gz" .
 
-tarball_sha256="$(sha256sum "$DIST/omarchy-wsl.tar.gz" | awk '{print $1}')"
-echo "$tarball_sha256" > "$DIST/omarchy-wsl.tar.gz.sha256"
+tarball_sha256="$(sha256sum "$DIST/omarchy-v1.tar.gz" | awk '{print $1}')"
+echo "$tarball_sha256" > "$DIST/omarchy-v1.tar.gz.sha256"
+
+# A `.wsl` file is, per Microsoft's own build-custom-distro doc, exactly this
+# same tarball with a renamed extension — no extra manifest/metadata needed
+# for local `wsl --install --from-file`/double-click use (only the online
+# `wsl --list --online` catalog flow needs a separate DistributionInfo.json).
+# This is the primary, supported way to install this image: WSL's own
+# first-run mechanism (/etc/wsl-distribution.conf's oobe.command, which is
+# what actually runs first-boot provisioning — see docs/install-audit.md's
+# "Incident #4") only fires for this install path, not for `wsl --import`,
+# confirmed on real hardware.
+log "Copying to dist/omarchy-v1.wsl (same bytes, renamed — see comment above)"
+cp "$DIST/omarchy-v1.tar.gz" "$DIST/omarchy-v1.wsl"
+echo "$tarball_sha256" > "$DIST/omarchy-v1.wsl.sha256"
 
 # shellcheck source=../packages/OMARCHY_VERSION_PIN
 source "$REPO/packages/OMARCHY_VERSION_PIN"
@@ -263,7 +276,8 @@ cat > "$DIST/build-manifest.json" <<EOF
   "omarchy_base_packages_branch": "$default_branch",
   "omarchy_keyring_pin": "$FILENAME",
   "package_spec_count": $(wc -l < "$SCRATCH/manifest.txt"),
-  "tarball_sha256": "$tarball_sha256"
+  "tarball_sha256": "$tarball_sha256",
+  "wsl_file_sha256": "$tarball_sha256"
 }
 EOF
 
