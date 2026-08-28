@@ -29,13 +29,17 @@
 #
 # Output: $1/manifest.txt — package names/specs to pass to pacstrap.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# A relative $1 must resolve against the caller's cwd, not this script's own
+# directory — resolving OUT_DIR before any `cd` (there isn't one) keeps that
+# true; every current caller happens to pass an absolute path, but a relative
+# one would otherwise have silently landed in the wrong place.
 OUT_DIR="${1:?usage: resolve-packages.sh <output-dir>}"
 mkdir -p "$OUT_DIR"
 
 # shellcheck source=./OMARCHY_VERSION_PIN
-source ./OMARCHY_VERSION_PIN
+source "$SCRIPT_DIR/OMARCHY_VERSION_PIN"
 
 default_branch="$(curl -fsSL https://api.github.com/repos/basecamp/omarchy | \
   grep -m1 '"default_branch"' | sed -E 's/.*"default_branch": *"([^"]+)".*/\1/')"

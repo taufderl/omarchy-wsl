@@ -47,6 +47,16 @@ check_not_enabled() {
   fi
 }
 
+check_masked() {
+  local unit="$1"
+  # A masked unit is a symlink straight to /dev/null at /etc/systemd/system/<unit>.
+  if [[ ! -L "$TARGET/etc/systemd/system/$unit" ]] || \
+     [[ "$(readlink "$TARGET/etc/systemd/system/$unit")" != "/dev/null" ]]; then
+    echo "FAIL: unit '$unit' is not masked (see build/_inside-container.sh's WSL overrides)" >&2
+    fail=1
+  fi
+}
+
 # --- The one real structural exclusion: kernel/initramfs/DKMS. ---
 # mkinitcpio is NOT in this list on purpose: it's a real, unavoidable
 # dependency of the real omarchy package (via limine-mkinitcpio-hook) and
@@ -69,9 +79,29 @@ done
 
 # --- Present-but-must-not-be-enabled (the short, explicit override from ---
 # --- build/_inside-container.sh — see PLAN.md for the reasoning).       ---
-for unit in NetworkManager.service sddm.service cups.service cups-browsed.service avahi-daemon.service; do
+for unit in sddm.service cups.service cups-browsed.service avahi-daemon.service; do
   check_not_enabled "$unit"
 done
+
+# --- Masked (not just disabled) — NetworkManager per our own reasoning,   ---
+# --- the rest per Microsoft's own WSL custom-distro guidance.             ---
+for unit in NetworkManager.service systemd-resolved.service systemd-networkd.service \
+            systemd-tmpfiles-setup.service systemd-tmpfiles-clean.service systemd-tmpfiles-clean.timer \
+            systemd-tmpfiles-setup-dev-early.service systemd-tmpfiles-setup-dev.service tmp.mount; do
+  check_masked "$unit"
+done
+
+# --- First-boot provisioning: WSL's own oobe.command mechanism, not a  ---
+# --- shell rc-file hook — see docs/install-audit.md's incident write-up. ---
+if [[ ! -f "$TARGET/etc/wsl-distribution.conf" ]] || \
+   ! grep -q '^command = /usr/local/bin/omarchy-wsl-oobe$' "$TARGET/etc/wsl-distribution.conf"; then
+  echo "FAIL: /etc/wsl-distribution.conf missing or doesn't point oobe.command at our script" >&2
+  fail=1
+fi
+if ! arch-chroot "$TARGET" test -x /usr/local/bin/omarchy-wsl-oobe; then
+  echo "FAIL: /usr/local/bin/omarchy-wsl-oobe missing or not executable" >&2
+  fail=1
+fi
 
 if (( fail )); then
   echo "verify-no-boot-artifacts: FAILED" >&2

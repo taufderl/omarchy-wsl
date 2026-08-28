@@ -25,12 +25,13 @@ This describes what actually gets installed/run and why, superseding an earlier 
 Everything else `omarchy` and `omarchy-base.packages` bring along installs for real: `hyprland`, `sddm`, `quickshell`, `uwsm`, `limine`, `limine-mkinitcpio-hook`, `limine-snapper-sync`, `snapper`, `btrfs-progs`, `xorg-server`, `mesa`, the full GUI/Wayland stack, `efibootmgr`/`efivar`, everything. None of it is excluded from the package set — it's real Omarchy, installed as real Omarchy installs it. The only intervention is a short, explicit override in `build/_inside-container.sh`, applied *after* the real `install/config/enable-services.sh` (part of `install/config/all.sh`) has already run and enabled everything upstream normally enables:
 
 ```
-systemctl disable NetworkManager.service    # conflicts with WSL2's own networking
 systemctl disable sddm.service              # no display in v1; would fail/retry every boot otherwise
 systemctl disable cups.service cups-browsed.service avahi-daemon.service  # security: no always-on network-facing daemons by default
 ```
 
 `power-profiles-daemon` and everything else upstream enables is left alone — no functional conflict, no security concern, no reason to override it.
+
+Separately, `NetworkManager.service`, `systemd-resolved.service`, `systemd-networkd.service`, and the `systemd-tmpfiles-*`/`tmp.mount` units are **masked** (not just disabled) per Microsoft's own WSL custom-distro guidance (https://learn.microsoft.com/en-us/windows/wsl/build-custom-distro, "Systemd recommendations") — these are listed there as known to cause issues under WSL for *any* distro, a WSL-platform concern rather than something specific to Omarchy.
 
 ## First-boot provisioning: the real binary, not a rewrite
 
@@ -40,6 +41,12 @@ systemctl disable cups.service cups-browsed.service avahi-daemon.service  # secu
 - "Hands off to SDDM" turns out to be nothing more than `Before=display-manager.service` unit *ordering* in the real `.service` file (not used here — see below) — the script itself never execs or blocks on a display manager. Since `sddm.service` is disabled (see above), nothing hands off to anything; the script just finishes.
 - It already self-checks `[[ -f $PROVISIONING_DIR/pending ]] || exit 0` on entry (its own line 25) — safe to invoke directly without a systemd `ConditionPathExists` gate duplicating that check.
 - Its `finalize_user()` step already runs the equivalent of `omarchy-provision-user`, which itself does `source "$OMARCHY_INSTALL/user/all.sh"` — i.e. calling this one binary already correctly runs all the real per-user setup (theme seeding, xdg-user-dirs, dev-tool installs, etc.), with correct `$HOME`/`$OMARCHY_USER_NAME` context, automatically. No separate per-user script wiring needed.
+
+### How it's actually triggered (current, final mechanism)
+
+`/etc/wsl-distribution.conf`'s `[oobe] command = /usr/local/bin/omarchy-wsl-oobe` — WSL's own officially documented first-run mechanism (supported since WSL 2.4.4, https://learn.microsoft.com/en-us/windows/wsl/build-custom-distro), the same one Ubuntu/Debian's WSL distros use for their "create a UNIX user" prompt. WSL's own launcher runs this command the first time a shell is opened for the distribution — **before any shell or rc-file even exists** for that session, let alone a race against one. `wsl/oobe.sh` (installed as `/usr/local/bin/omarchy-wsl-oobe`) just calls the real binary through the same `flock -n` guard as before, then `wsl/apply-default-user.sh`, and deliberately never returns non-zero (WSL's own contract: a non-zero `oobe.command` locks the user out of a shell entirely — a cancelled/failed attempt should leave a root shell to retry from, not lock anyone out).
+
+This replaced three rounds of shell-rc-file-based triggers (incidents #1–#3 below), each a real, repeatable fix that still weren't reliable end to end. Kept for the record — the actual lesson learned is in the paragraph after incident #3, not in any of the individual fixes.
 
 ### Incident: why this isn't triggered by `omarchy-provision-owner.service`
 
@@ -72,11 +79,16 @@ Fixed by moving the trigger to `PROMPT_COMMAND` instead of running inline in `.b
 
 **Related, separate WSL quirk found along the way**: `wsl --terminate <distro>` (stopping just that one distro) was not sufficient to make WSL re-read a `wsl.conf` change — the instance kept starting as root even after the new `[user] default=` was written and the distro terminated and restarted. `wsl --shutdown` (stopping the entire WSL VM) reliably picked it up. `wsl/apply-default-user.sh`'s own printed instructions and the README use `--shutdown`, not `--terminate`, for this reason.
 
-**Confirmed resolved**: a fully fresh `wsl --import` (no manual `omarchy-provision-owner` invocation) subsequently showed the real splash screen automatically, completed the entire flow unattended, and landed as the new user after a `--shutdown`+relaunch — the `PROMPT_COMMAND` fix works. One more red herring along the way while verifying this: an old `omarchy-provision-owner` process left running from *hours* earlier (a leftover from this same debugging session, on the previous import) was still holding the `flock` lock, silently blocking one otherwise-correct fresh attempt — `flock -n` behaved exactly as designed once this was found; it wasn't a code bug, just leftover test-session state.
+**Appeared resolved, then wasn't**: one fully fresh `wsl --import` (no manual `omarchy-provision-owner` invocation) did show the real splash screen automatically and complete the entire flow unattended — this was genuinely called "confirmed resolved" at the time. One red herring surfaced verifying it: an old `omarchy-provision-owner` process left running from *hours* earlier (a leftover from this same debugging session) was still holding the `flock` lock during one attempt, unrelated to the actual fix. But a subsequent, fully clean test — full Windows reboot, fresh unregister/import, no leftover state possible at all — reproduced the exact same "straight to a root shell" symptom again. `PROMPT_COMMAND` was a real improvement over the first two attempts, but still not reliable: process inspection on that failed attempt showed the real splash *had* rendered — on a different pty than the one the session was actually attached to. Same underlying category of problem as incidents #1–#2, not actually fixed by changing where in shell startup the trigger lived.
 
-### The one genuinely new, WSL-only piece
+**The actual lesson, after three rounds of this**: every one of incidents #1–#3 was a shell/rc-file trick trying to guess the right moment to grab a terminal WSL itself was still in the middle of setting up — and no amount of picking a different moment (a systemd unit, an inline `.bashrc` command, `PROMPT_COMMAND`) fixes a race against a process that isn't ours to synchronize with. The fix wasn't a fourth guess at shell-startup timing — it was to stop using a shell-startup hook at all, in favor of WSL's own first-run mechanism (`/etc/wsl-distribution.conf`'s `oobe.command`, described above), which runs *as part of* WSL setting up that session's console, not racing against it from inside a shell that WSL is itself still in the middle of setting up.
 
-`wsl/apply-default-user.sh`, called right after `omarchy-provision-owner` exits. Bare metal has no concept of "the WSL default user" for a launcher to pick, so there's no upstream file or behavior to defer to here — this finds the newly-created account and writes it into `/etc/wsl.conf`'s `[user] default=`. Everything else about first-boot provisioning is the real thing.
+### The genuinely new, WSL-only pieces
+
+- `wsl/oobe.sh` (installed as `/usr/local/bin/omarchy-wsl-oobe`) and `wsl/wsl-distribution.conf` — the glue that hooks the real binary up to WSL's own first-run mechanism. Bare metal has no `oobe.command` concept; this is the one place this project defines its own entry point, and it does nothing but call the real binary.
+- `wsl/apply-default-user.sh`, called right after `omarchy-provision-owner` exits. Bare metal has no concept of "the WSL default user" for a launcher to pick either — this finds the newly-created account and writes it into `/etc/wsl.conf`'s `[user] default=`, as a defense-in-depth backstop alongside `wsl-distribution.conf`'s own `oobe.defaultUid = 1000` (which should make WSL pick up the new user immediately, in the same session, with no restart needed — `apply-default-user.sh`'s restart-required path is the fallback if that doesn't hold for some reason).
+
+Everything else about first-boot provisioning is the real thing.
 
 ## Corrections this pivot resolved for free
 
@@ -89,4 +101,4 @@ Several things patched around in the previous (hand-curated) version of this bui
 
 - [ ] Empirically verify a sample of hardware-gated `bin/omarchy-*` runtime scripts (battery, brightness, bluetooth, hw-nvidia, etc.) degrade cleanly with no hardware present — not yet checked against a real running instance.
 - [x] `install/config/snapper.sh` fails as predicted (D-Bus `FileNotFound`) — confirmed harmless, logged, doesn't block the rest of the chain (see above).
-- [ ] Confirm `install/config/firewall.sh` (also run unmodified) doesn't hang waiting on an interactive confirmation prompt under WSL2 — not yet observed either way in a build log.
+- [x] `install/config/firewall.sh` (also run unmodified) does not hang — confirmed completing cleanly in a real build log (`Default incoming policy changed to 'deny'` ... `Completed: .../firewall.sh`).

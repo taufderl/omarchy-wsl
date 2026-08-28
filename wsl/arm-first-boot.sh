@@ -2,39 +2,29 @@
 # Arms first-boot owner provisioning inside the target rootfs. Run once, at
 # build time, inside the chroot (build/_inside-container.sh calls this).
 #
-# Unlike v1, this does not install any provisioning logic of our own — the
-# real /usr/bin/omarchy-provision-owner (shipped by the real `omarchy`
-# package) is used completely unmodified. "Arming" here means only: create
-# the pending sentinel it already expects (the same gating mechanism
-# upstream's own deferred-provisioning/factory-reset paths use — see
-# docs/install-audit.md), and hook root's shell startup to invoke it.
+# This does not install any provisioning logic of our own — the real
+# /usr/bin/omarchy-provision-owner (shipped by the real `omarchy` package)
+# is used completely unmodified. "Arming" here means: create the pending
+# sentinel it already expects (the same gating mechanism upstream's own
+# deferred-provisioning/factory-reset paths use — see docs/install-audit.md),
+# and hook it up to WSL's own first-run mechanism.
 #
-# Why a shell-startup hook and not the real omarchy-provision-owner.service:
-# tried that first, on real hardware. journalctl showed the service actually
-# start, then get killed by its own TTYVHangup=yes within ~6 seconds — that
-# flag force-hangs-up /dev/tty1 to reclaim it from a previous session (a
-# getty, or SDDM waiting to start); under WSL there is no previous session,
-# so it just hung up its own just-started process. This is a WSL-vs-bare-metal
-# environment difference, not a decision to not use the real binary — the
-# binary itself is untouched, only how/when it's invoked differs. Full
-# incident write-up in docs/install-audit.md.
+# History (full account in docs/install-audit.md): this used to be a hook in
+# root's .bashrc, first guarded on `[[ $- == *i* ]]`, then on
+# `-t 0`/`-t 1`, then moved to `PROMPT_COMMAND` — three real, repeatable
+# fixes on real hardware, and *still* not reliable: a genuinely fresh
+# `wsl --import` kept showing the real splash rendering on a pty that wasn't
+# the one the session actually attached to. All three attempts were shell
+# rc-file tricks racing against however WSL's own launcher sets up a
+# session's console — a race we can't fully control from inside the guest.
 #
-# Why PROMPT_COMMAND and not inline in .bashrc: a second real-hardware round
-# confirmed the real binary and the environment (TERM, terminal size) were
-# both fine — running `omarchy-provision-owner` manually, by hand, after
-# `wsl -d omarchy` had already dropped to a shell, worked perfectly and
-# completed the entire real flow (account creation, all the real per-user
-# install/user/*.sh setup). But invoked directly inline during .bashrc
-# sourcing, it produced zero visible output and left the shell looking
-# untouched every time. The most likely explanation: bash has not yet fully
-# taken control of the terminal (job control / foreground process group)
-# at that exact point during interactive shell initialization, which breaks
-# a raw-terminal, animation-driving TUI like this one even though a plain
-# shell works fine at the same point. PROMPT_COMMAND runs right before the
-# first prompt is displayed, once the shell is fully up — matching the
-# working manual-invocation case — and only exists in interactive shells to
-# begin with, so it doubles as the interactivity guard v1/v2 of this hook
-# each got wrong in a different way (see docs/install-audit.md for both).
+# The actual fix: WSL has an official, built-in first-run mechanism for
+# exactly this (`/etc/wsl-distribution.conf`'s `[oobe] command=`, supported
+# since WSL 2.4.4 — https://learn.microsoft.com/en-us/windows/wsl/build-custom-distro).
+# It's the same mechanism Ubuntu/Debian's WSL distros use for their "create
+# a UNIX user" prompt: WSL's own launcher runs the command the first time a
+# shell is opened, before any shell/rc-file layer exists to race against.
+# See wsl-distribution.conf and oobe.sh.
 set -euo pipefail
 
 WSL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,36 +32,13 @@ TARGET="${1:?usage: arm-first-boot.sh <target-rootfs-path>}"
 
 install -Dm755 "$WSL_DIR/apply-default-user.sh" \
   "$TARGET/usr/local/bin/omarchy-wsl-apply-default-user"
+install -Dm755 "$WSL_DIR/oobe.sh" \
+  "$TARGET/usr/local/bin/omarchy-wsl-oobe"
+install -Dm644 "$WSL_DIR/wsl-distribution.conf" \
+  "$TARGET/etc/wsl-distribution.conf"
 
 mkdir -p "$TARGET/var/lib/omarchy/provisioning"
 : > "$TARGET/var/lib/omarchy/provisioning/pending"
 : > "$TARGET/var/lib/omarchy/provisioning/.lock"
 
-# flock-guarded: two `wsl -d` windows opened at once run this exactly once;
-# the second just proceeds to a normal prompt. omarchy-provision-owner
-# itself re-checks the pending sentinel on entry too (it's written to do
-# that regardless of caller, for its own deferred-provisioning/factory-reset
-# use cases), so this is safe even if PROMPT_COMMAND somehow fired twice.
-# The function removes itself from PROMPT_COMMAND after running once, so a
-# cancelled/failed attempt doesn't retry before every single subsequent
-# prompt in the same session — just once per session, same as before.
-HOOK='
-# omarchy-wsl: first-boot owner provisioning (see wsl/arm-first-boot.sh)
-omarchy_wsl_first_boot_check() {
-  PROMPT_COMMAND="${PROMPT_COMMAND//omarchy_wsl_first_boot_check;/}"
-  if [[ -f /var/lib/omarchy/provisioning/pending ]]; then
-    flock -n /var/lib/omarchy/provisioning/.lock /usr/bin/omarchy-provision-owner
-    /usr/local/bin/omarchy-wsl-apply-default-user
-  fi
-}
-PROMPT_COMMAND="omarchy_wsl_first_boot_check;${PROMPT_COMMAND}"
-'
-mkdir -p "$TARGET/root"
-printf '%s\n' "$HOOK" >> "$TARGET/root/.bashrc"
-# root has no .bash_profile in a fresh pacstrap, so a login shell (the case
-# `wsl -d <distro>` most likely hits) would otherwise skip .bashrc entirely.
-cat > "$TARGET/root/.bash_profile" <<'EOF'
-[[ -f ~/.bashrc ]] && source ~/.bashrc
-EOF
-
-echo "Armed first-boot provisioning (real omarchy-provision-owner) in $TARGET"
+echo "Armed first-boot provisioning (real omarchy-provision-owner, via WSL's own oobe.command) in $TARGET"

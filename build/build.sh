@@ -3,8 +3,9 @@
 #
 # Runs entirely inside a disposable `archlinux` container (never on the host,
 # never in a QEMU VM, never via a manual ISO install) — see PLAN.md
-# "Architecture" for why. Produces dist/omarchy-wsl.tar.gz plus a checksum,
-# signature, and build manifest.
+# "Architecture" for why. Produces dist/omarchy-wsl.tar.gz plus a sha256
+# checksum and a build manifest (no artifact signing yet — see PLAN.md's
+# security-hardening section for what's still open there).
 #
 # Usage: ./build/build.sh
 #   Requires: docker (or podman, via CONTAINER_ENGINE=podman), network access,
@@ -31,7 +32,6 @@ echo "==> Building inside a disposable archlinux container"
 "$CONTAINER_ENGINE" run --rm --privileged \
   -v "$REPO_ROOT:/repo:ro" \
   -v "$DIST_DIR:/dist" \
-  -e OMARCHY_MIRROR_URL="${OMARCHY_MIRROR_URL:-}" \
   archlinux:latest \
   bash /repo/build/_inside-container.sh
 

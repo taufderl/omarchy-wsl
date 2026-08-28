@@ -9,7 +9,9 @@
 #   ./smoke-test.sh --live            checks run FROM INSIDE the imported WSL2
 #                                      instance itself (`wsl -d Omarchy`, then
 #                                      run this there) — the checks that only
-#                                      make sense against a booted systemd
+#                                      make sense against a booted, running
+#                                      instance (systemd health, live network
+#                                      state, the actual default user)
 set -euo pipefail
 
 mode="${1:-}"
@@ -35,13 +37,14 @@ case "$mode" in
     check "wsl.conf present with systemd=true"
     if grep -q '^systemd=true' "$target/etc/wsl.conf" 2>/dev/null; then ok; else bad "missing/wrong wsl.conf"; fi
 
-    check "first-boot provisioning armed (real omarchy-provision-owner, hooked from root's shell startup)"
+    check "first-boot provisioning armed (real omarchy-provision-owner, via WSL's own oobe.command)"
     if [[ -f "$target/var/lib/omarchy/provisioning/pending" ]] && \
        arch-chroot "$target" test -x /usr/bin/omarchy-provision-owner && \
-       grep -q 'omarchy-provision-owner' "$target/root/.bashrc" 2>/dev/null; then
+       arch-chroot "$target" test -x /usr/local/bin/omarchy-wsl-oobe && \
+       grep -q '^command = /usr/local/bin/omarchy-wsl-oobe$' "$target/etc/wsl-distribution.conf" 2>/dev/null; then
       ok
     else
-      bad "provisioning sentinel, real omarchy-provision-owner binary, or root .bashrc hook missing"
+      bad "provisioning sentinel, real omarchy-provision-owner binary, oobe script, or wsl-distribution.conf missing"
     fi
 
     check "every resolved package spec is actually satisfied in the target"

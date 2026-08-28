@@ -209,9 +209,22 @@ done
 #    else upstream enables is touched.
 # ---------------------------------------------------------------------------
 log "Applying the WSL service overrides (see PLAN.md for the reasoning per line)"
-arch-chroot "$TARGET" systemctl disable NetworkManager.service || true   # conflicts with WSL2's own networking
 arch-chroot "$TARGET" systemctl disable sddm.service || true            # no display in v1; would fail/retry every boot otherwise
 arch-chroot "$TARGET" systemctl disable cups.service cups-browsed.service avahi-daemon.service || true  # security: no always-on network-facing daemons by default
+
+# Separately, Microsoft's own WSL custom-distro guidance
+# (https://learn.microsoft.com/en-us/windows/wsl/build-custom-distro,
+# "Systemd recommendations") lists these exact units as known to cause
+# issues under WSL specifically — a WSL-platform concern, not an Omarchy
+# one, masked (not just disabled) the same way that guidance says to for
+# any distro. NetworkManager.service is in their list too — masked here
+# instead of the plain `disable` an earlier version of this file used,
+# for the same reason as the rest of this group.
+for unit in NetworkManager.service systemd-resolved.service systemd-networkd.service \
+            systemd-tmpfiles-setup.service systemd-tmpfiles-clean.service systemd-tmpfiles-clean.timer \
+            systemd-tmpfiles-setup-dev-early.service systemd-tmpfiles-setup-dev.service tmp.mount; do
+  arch-chroot "$TARGET" systemctl mask "$unit" || true
+done
 
 # ---------------------------------------------------------------------------
 # 9. WSL integration layer: wsl.conf, first-boot owner provisioning (the

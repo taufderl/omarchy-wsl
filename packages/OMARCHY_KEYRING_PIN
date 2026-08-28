@@ -1,5 +1,7 @@
 # Pinned bootstrap trust anchor for the [omarchy] pacman repo
-# (https://pkgs.omarchy.org/stable/$arch — see patches/pacman-stable.conf).
+# (https://pkgs.omarchy.org/stable/$arch — the bootstrap pacman.conf that
+# points at it is fetched live in build/_inside-container.sh, not vendored
+# in this repo).
 #
 # This package is what establishes trust in the omarchy repo's signing key in
 # the first place (its post_install scriptlet runs `pacman-key --populate

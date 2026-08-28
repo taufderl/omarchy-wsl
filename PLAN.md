@@ -4,9 +4,9 @@ This is the contributor-facing build design. Read `README.md` first for the user
 
 ## Implementation status
 
-**Fully verified live, end to end, on real Windows/WSL2 hardware — including the automatic path.** A completely fresh `wsl --import` (no manual workaround) boots, shows the real Omarchy splash ("Press Return to Start Setup") automatically via the `PROMPT_COMMAND` trigger, and completes the entire real flow: `omarchy-provision-owner` (unmodified) creates the account, sets hostname/timezone and git identity, runs all the real per-user `install/user/*.sh` setup (skill symlinks, `~/Work`, a real `mise`-managed Node.js install, `.XCompose`), and `wsl/apply-default-user.sh` correctly points `wsl.conf` at the new user. After a full `wsl --shutdown` + relaunch, the instance starts directly as that user — no root shell fallback, no manual intervention. `~` was inspected directly post-setup: real Omarchy dotfiles only (`.config/hypr`, `.config/nvim`, `.config/starship.toml`, etc.), no system-level clutter.
+First-boot provisioning is now triggered via WSL's own official first-run mechanism (`/etc/wsl-distribution.conf`'s `oobe.command`, supported since WSL 2.4.4 — the same one Ubuntu/Debian's WSL distros use), **not** a shell rc-file hook. Three earlier rounds of live-hardware debugging (`.bashrc` inline, `$-`-based, then `PROMPT_COMMAND`-based triggers — each a real, repeatable fix, none reliable end to end) are recorded in `docs/install-audit.md` for the reasoning, but all three are superseded, not layered on top of. `omarchy-provision-owner` itself remains the real, unmodified binary throughout — only *what invokes it* changed.
 
-Getting there took three rounds of real, live-hardware debugging (terminal size, `TERM`, then the actual `.bashrc`-vs-`PROMPT_COMMAND` invocation-timing root cause), plus a final one where a *stale flock-holding process from earlier testing* silently blocked one attempt (not a code bug — the lock behaved exactly as designed once found). Full account in `docs/install-audit.md`.
+One earlier build (using the `PROMPT_COMMAND` trigger) did complete an entire fresh `wsl --import` unattended — real splash, real account creation, all the real per-user setup, correct `/etc/skel` — but a subsequent fully-clean test (full Windows reboot, fresh unregister/import) reproduced the original "straight to a root shell" symptom again, showing the fix wasn't actually reliable. Rebuilt on the `oobe.command` mechanism; **not yet re-verified on real hardware** — that's the next test.
 
 ## Why this is built the way it is
 
@@ -33,8 +33,8 @@ The fix, confirmed by actually downloading and inspecting the real packages from
    pacstrap target/
    recreate default/pacman/* at the path install/post-install/pacman.sh expects (not shipped in any package)
    arch-chroot: run the REAL install/config/all.sh, install/post-install/all.sh — unmodified
-   apply the short, explicit WSL service-disable override (NetworkManager, sddm, cups*, avahi-daemon)
-   arm first-boot provisioning: the REAL omarchy-provision-owner, hooked from root's .bashrc
+   apply the short, explicit WSL service overrides (disable sddm/cups*/avahi-daemon; mask NetworkManager + Microsoft's WSL-recommended units)
+   arm first-boot provisioning: the REAL omarchy-provision-owner, via /etc/wsl-distribution.conf's oobe.command
    verify (wsl/verify-no-boot-artifacts.sh)
    tar target/ → dist/omarchy-wsl.tar.gz + sha256 + build-manifest.json
 ```
@@ -54,11 +54,11 @@ No vendored/hand-edited package list in this repo. Three inputs:
 
 ### Service overrides
 
-Applied *after* the real `install/config/enable-services.sh` has already run (it's part of `install/config/all.sh`) and enabled everything upstream normally enables. A short, explicit, separately-visible override then disables exactly three things, each with a stated reason (functional conflict or the original security brief) — see `docs/install-audit.md`. Nothing else upstream enables is touched.
+Applied *after* the real `install/config/enable-services.sh` has already run (it's part of `install/config/all.sh`) and enabled everything upstream normally enables. A short, explicit, separately-visible override then disables a few things for our own stated reasons (functional conflict or the original security brief), and separately masks `NetworkManager` plus a handful of units Microsoft's own WSL custom-distro guidance lists as known to cause issues under WSL for any distro — see `docs/install-audit.md`. Nothing else upstream enables is touched.
 
 ### First-boot provisioning
 
-The real `/usr/bin/omarchy-provision-owner`, completely unmodified, triggered from a hook in `/root/.bashrc`/`.bash_profile` instead of its own `.service` unit (which crashes under WSL — see `docs/install-audit.md`'s incident write-up) plus one genuinely new WSL-only step (`wsl/apply-default-user.sh`) to set `/etc/wsl.conf`'s default user, since bare metal has no equivalent concept at all.
+The real `/usr/bin/omarchy-provision-owner`, completely unmodified, triggered via `/etc/wsl-distribution.conf`'s `oobe.command` — WSL's own official first-run mechanism (supported since WSL 2.4.4), the same one Ubuntu/Debian's WSL distros use. Not its own `.service` unit (crashes under WSL — see `docs/install-audit.md`), and not a shell rc-file hook either (three rounds of that, each a real fix, none reliable end to end — full account in `docs/install-audit.md`). Plus one genuinely new WSL-only step (`wsl/apply-default-user.sh`) to set `/etc/wsl.conf`'s default user as a backstop, since bare metal has no equivalent concept at all.
 
 ## Security hardening
 
@@ -66,7 +66,7 @@ The real `/usr/bin/omarchy-provision-owner`, completely unmodified, triggered fr
 - The `[omarchy]` repo's signing key is trusted via a pinned, sha256-verified `omarchy-keyring` package (`packages/OMARCHY_KEYRING_PIN`) — the standard bootstrap approach for a repo whose own keyring package can't verify itself, same as `archlinux-keyring`.
 - `omarchy=$OMARCHY_VERSION` is pinned (not floating) for build stability/traceability; every build's manifest records exactly what version and branch state it used.
 - No default/blank passwords — `omarchy-provision-owner`'s own real password-setup flow is unchanged.
-- `NetworkManager`/`sddm`/`cups`/`cups-browsed`/`avahi-daemon` are installed but explicitly not enabled — no always-on network-facing daemons or conflicting network stacks by default.
+- `NetworkManager`/`sddm`/`cups`/`cups-browsed`/`avahi-daemon` are installed but explicitly not enabled (disabled or masked) — no always-on network-facing daemons or conflicting network stacks by default.
 - The final tarball is checksummed; a build manifest records the pinned version, the `omarchy-base.packages` branch state, and the keyring pin used.
 - Threat model: a WSL distro runs with the invoking user's own privileges and reaches the Windows filesystem via `/mnt/c` — this project doesn't create isolation that doesn't exist upstream either, in WSL2 or in Omarchy.
 
