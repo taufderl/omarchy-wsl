@@ -35,30 +35,32 @@ Everything else (packages, shell, Neovim config, theming, `omarchy-*` CLI tools,
 
 ## Quickstart
 
+### 1. Build
+
+The .wsl image needs to be built on a Linux environment with Docker/Podman. This can be another WSL instance. For build details see [PLAN.md](./PLAN.md)
+
 ```sh
-# 1. Build. Run this from a Linux environment (a real machine, a VM, or
-#    another WSL2 distro with Docker/Podman installed all work). See
-#    PLAN.md for what this actually does.
 ./build/build.sh
+```
 
-# 2. Install (run from Windows/PowerShell, pointing at the produced .wsl file)
-wsl --install --from-file dist\omarchy-v1.wsl
+### 2. Install and Launch
 
-# 3. First launch
+Just double click on `omarchy-v1.wsl` in Windows Explorer. This will install and automatically launch Omarchy WSL. 
+
+Alternatively run:
+
+```powershell
+wsl --install --from-file omarchy-v1.wsl
 wsl -d omarchy
 ```
 
-`--install --from-file` (or double-clicking the `.wsl` file in Explorer) matters here, not just as a preference: it's what makes WSL run its own first-run mechanism (`/etc/wsl-distribution.conf`'s `oobe.command`), which is what actually triggers first-boot provisioning. On first launch, you'll be asked for a username, password, hostname, and timezone: the real Omarchy owner-setup flow itself, unmodified, dropping you straight into your new user's shell in the same window once setup finishes, no restart needed. Confirmed end to end on real hardware: `oobe.command` fires immediately, and the session lands in the new custom user directly, with no `wsl --shutdown`/relaunch required.
+First launch triggers the real Omarchy owner-setup flow (username, password, hostname, timezone), it only skips the hard drive setup.
 
-**Don't use `wsl --import` for this image.** It produces a working rootfs, but WSL does not run `oobe.command` for a plain import (confirmed against Microsoft's own docs, see `docs/install-audit.md`'s "Incident #4", and on real hardware), so first-boot provisioning never fires and you're left at a root shell with no account created. `dist/omarchy-v1.tar.gz` (the same bytes as the `.wsl` file, before the extension rename) is still produced by the build for inspection/debugging, but it isn't the supported install path.
+![Omarchy's real first-boot keyboard layout picker, running under WSL](docs/screenshots/01-oobe-keyboard-layout.png)
 
-## First start
+Then it drops you straight into your new user's shell:
 
-Real first-boot provisioning (the actual `omarchy-provision-owner` binary from the `omarchy` package, unmodified) running end to end on real Windows/WSL2 hardware, right down to a real `fastfetch` confirming it's genuinely Omarchy underneath.
-
-| ![Omarchy's real first-boot keyboard layout picker, running under WSL](docs/screenshots/01-oobe-keyboard-layout.png) | ![fastfetch output showing Omarchy 4.0.1-1 running on Linux 6.18-microsoft-standard-WSL2](docs/screenshots/04-fastfetch-real-omarchy.png) |
-|:---:|:---:|
-| *The real owner-setup flow's keyboard/language layout step* | *`fastfetch`: real Omarchy, real WSL2 kernel, real hardware underneath* |
+![fastfetch output showing Omarchy 4.0.1-1 running on Linux 6.18-microsoft-standard-WSL2](docs/screenshots/04-fastfetch-real-omarchy.png)
 
 ## Project layout
 
