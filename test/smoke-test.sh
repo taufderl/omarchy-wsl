@@ -23,7 +23,9 @@ case "$mode" in
     target="${2:?usage: smoke-test.sh --target <path>}"
     echo "Offline checks against $target"
 
-    check "no bare-metal-only packages/artifacts"
+    check "package/service state matches the intended architecture"
+    # sddm/limine/hyprland etc. are EXPECTED present (real omarchy deps),
+    # just not enabled — see wsl/verify-no-boot-artifacts.sh and PLAN.md.
     if bash "$(dirname "${BASH_SOURCE[0]}")/../wsl/verify-no-boot-artifacts.sh" "$target" >/tmp/verify.log 2>&1; then
       ok
     else
@@ -33,26 +35,30 @@ case "$mode" in
     check "wsl.conf present with systemd=true"
     if grep -q '^systemd=true' "$target/etc/wsl.conf" 2>/dev/null; then ok; else bad "missing/wrong wsl.conf"; fi
 
-    check "first-boot provisioning armed"
-    # Triggered from root's shell startup (wsl/arm-first-boot.sh), not a
-    # systemd unit — see docs/install-audit.md for why a TTYPath=/dev/tty1
-    # service didn't work under WSL2 (killed by its own TTYVHangup=yes).
+    check "first-boot provisioning armed (real omarchy-provision-owner, hooked from root's shell startup)"
     if [[ -f "$target/var/lib/omarchy/provisioning/pending" ]] && \
-       [[ -x "$target/usr/local/bin/omarchy-wsl-provision-owner" ]] && \
-       grep -q 'omarchy-wsl-provision-owner' "$target/root/.bashrc" 2>/dev/null; then
+       arch-chroot "$target" test -x /usr/bin/omarchy-provision-owner && \
+       grep -q 'omarchy-provision-owner' "$target/root/.bashrc" 2>/dev/null; then
       ok
     else
-      bad "provisioning sentinel, driver script, or root .bashrc hook missing"
+      bad "provisioning sentinel, real omarchy-provision-owner binary, or root .bashrc hook missing"
     fi
 
-    check "every manifest package is actually satisfied in the target"
+    check "every resolved package spec is actually satisfied in the target"
     # `pacman -T` (not a name-diff against `pacman -Qqe`) because several
-    # manifest entries are virtual/provided names — e.g. "nvim" installs as
-    # the real package "neovim", which `Provides: nvim`. A plain `pacman -Qqe`
-    # diff flags that as "missing" even though it's genuinely installed and
+    # specs are virtual/provided names — e.g. "nvim" installs as the real
+    # package "neovim", which `Provides: nvim`. A plain `pacman -Qqe` diff
+    # flags that as "missing" even though it's genuinely installed and
     # working; `-T` resolves provides correctly and only prints what's truly
     # unsatisfied. (Caught by an actual false-positive in this exact check.)
-    unsatisfied="$(arch-chroot "$target" pacman -T $(cat "$(dirname "${BASH_SOURCE[0]}")/../packages/manifest.txt") || true)"
+    # Re-resolves against whatever's live right now, same as the build did —
+    # if run long after the build (upstream having moved on meanwhile) this
+    # can show false "missing" entries for packages added since; run this
+    # right after a build for a meaningful result.
+    resolve_scratch="$(mktemp -d)"
+    bash "$(dirname "${BASH_SOURCE[0]}")/../packages/resolve-packages.sh" "$resolve_scratch" >/dev/null
+    unsatisfied="$(arch-chroot "$target" pacman -T $(cat "$resolve_scratch/manifest.txt") || true)"
+    rm -rf "$resolve_scratch"
     if [[ -z "$unsatisfied" ]]; then ok; else bad "not satisfied in target: $unsatisfied"; fi
     ;;
 
@@ -70,9 +76,10 @@ case "$mode" in
     fi
 
     check "no unexpected listening services"
-    unexpected="$(ss -tlnH 2>/dev/null | awk '{print $4}' | grep -vE '^(127\.0\.0\.1|\[::1\]|0\.0\.0\.0):(631)$' || true)"
-    # (there shouldn't be anything at all in v1; the 631/cups exclusion above
-    # is defensive and should never actually match since cups isn't installed)
+    # cups/avahi/sddm are installed (real omarchy deps) but explicitly
+    # disabled (see build/_inside-container.sh's WSL overrides) — nothing
+    # should be listening at all.
+    unexpected="$(ss -tlnH 2>/dev/null | awk '{print $4}' || true)"
     if [[ -z "$unexpected" ]]; then ok; else bad "unexpected listeners: $unexpected"; fi
 
     check "first-boot owner provisioning completed (no pending sentinel left)"

@@ -1,0 +1,17 @@
+# Pinned version of the real `omarchy` pacman package (https://pkgs.omarchy.org/stable/).
+# build/_inside-container.sh installs exactly `omarchy=$OMARCHY_VERSION`, not
+# a floating "latest" — this is where "stable, bump deliberately" (the
+# project's own choice, see PLAN.md) lives as a single line.
+#
+# Everything else about what gets installed follows automatically from this
+# one pin: `omarchy`'s own %DEPENDS% (hyprland, sddm, limine, snapper, quickshell,
+# uwsm, gnome-keyring, gum, jq, ...) is pulled in by pacman, not hand-listed
+# here or anywhere else in this repo. Bumping this file to a newer version is
+# the entire "pick up a new omarchy release" workflow.
+#
+# Caveat (see PLAN.md "Open risk"): pkgs.omarchy.org may not keep old package
+# files around indefinitely. If this exact version is no longer served, the
+# build fails loudly at the `pacman -S omarchy=$OMARCHY_VERSION` step —
+# bump to whatever's current and rebuild.
+
+OMARCHY_VERSION=4.0.1-1

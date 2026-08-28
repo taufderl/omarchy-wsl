@@ -1,109 +1,71 @@
 # Install-script audit
 
-Classification of every script under `basecamp/omarchy`'s `install/` tree (pinned commit in `packages/UPSTREAM_COMMIT`), for the CLI-only v1 build. Each entry is **keep** (run unmodified), **guard** (run, but gated/adjusted for WSL2), or **skip** (not run in v1, with a reason). This is a maintained artifact — re-check it whenever `packages/fetch-upstream.sh` pulls a new commit.
+This describes what actually gets installed/run and why, superseding an earlier version of this document that hand-picked individual `install/*.sh` scripts by name. That approach was wrong — see PLAN.md's "Research finding that changes everything" for the full story. The short version: `omarchy` is a real pacman package, `/usr/share/omarchy/install/` (its complete `install/` tree) ships inside it, and this project runs the real orchestration files (`install/config/all.sh`, `install/post-install/all.sh`) from there wholesale, unmodified, rather than maintaining its own list of which individual scripts to call.
 
-Evidence quoted below is verbatim from the vendored/fetched upstream scripts, not paraphrased, so decisions can be checked against the actual source.
+## What actually runs
 
-## `install/hardware/*` — skip, as a category
+`build/_inside-container.sh` sources exactly two files, straight from the installed `omarchy` package, via their own real `helpers/logging.sh`:
 
-Every script here (`asus-rog.sh`, `dell-xps-touchpad-haptics.sh`, `dell-xps13-sidecar-amps.sh`, `surface.sh`, `network.sh`, `input-group.sh`, `set-wireless-regdom.sh`, `fix-fkeys.sh`, `fix-synaptic-touchpad.sh`, `bluetooth.sh`, `nvidia.sh`, `vulkan.sh`, the `intel/`, `asus/`, `apple/`, `lenovo/`, `framework/` subtrees, `fix-bcm43xx.sh`, `fix-surface-keyboard.sh`, `fix-yt6801-ethernet-adapter.sh`, `fix-tuxedo-backlight.sh`, `speaker-tuning.sh`) targets specific laptop vendors, GPU vendors, or kernel/DKMS swaps (see `install/hardware/all.sh`'s comment: *"Swap in the Panther Lake kernel before anything pulls DKMS modules in"*). None of this hardware exists under WSL2. **Skip the entire category.**
+- `install/config/all.sh` — theme-system, docker (a documented no-op — see below), snapper, locate, `enable-services.sh` (see the override note below), `firewall.sh`, and whatever else this file lists in whatever `omarchy` version is pinned. New entries upstream adds here are picked up automatically the next time the build runs against a newer pin — nothing in this repo needs to change.
+  - Invoked *without* `set -e` in the shell that sources it. A real build run showed why: `install/config/all.sh`'s body is a flat sequence of bare `run_logged "..."` calls with no `|| true`, and `run_logged` is explicitly designed to capture-and-continue on a failing script (it logs `Failed: script (exit code: N)` and returns rather than propagating a hard stop). Adding `set -e` around the whole chain ourselves turned one script's expected failure (`snapper.sh`, next item) into the rest of the chain — `locate.sh`, `enable-services.sh`, `firewall.sh` — silently never running at all. Fixed in `build/_inside-container.sh`.
+  - `snapper.sh` fails in this environment: `Failure (org.freedesktop.DBus.Error.FileNotFound)` — snapper's D-Bus-backed config creation has nothing to talk to / no btrfs target to configure here. Left to fail and be logged, exactly like any other hardware/environment mismatch this project doesn't special-case — matches the open item already flagged for this script before it was confirmed.
+  - The `limine` package's own pacman hook (`Deploying Limine after upgrade...`) fails on every `pacman` transaction with `ERROR: FAT32 boot partition not found` — expected and harmless (there is no ESP under WSL2), logged by pacman as a failed hook but does not abort the transaction or the build.
+- `install/post-install/all.sh` — pacman.conf/mirrorlist restore, udev, localdb. Its `pacman.sh` references `$OMARCHY_PATH/default/pacman/pacman-stable.conf` and `mirrorlist-stable`; those aren't shipped in any runtime package (confirmed by inspecting the real package's contents — it ships only `etc/skel/*` and `usr/share/omarchy/*`, no `default/`), so `build/_inside-container.sh` recreates them at the expected path from the same bootstrap files it already fetched to get pacman working in the first place. That's the one adaptation this category needs — the script itself is untouched.
 
-Exception: `install/hardware/pacman.sh` adds a hardware-conditional pacman repo (`arch-mact2`, gated on `lspci` matching a specific MacBook T2 audio device ID). It's self-gating and harmless to run, but it's Apple-T2-specific and belongs to the same category — **skip for consistency**, not because it would misbehave.
+## What deliberately never runs
 
-## `install/login/*`
+**`install/hardware/*`, as a category.** No matching hardware exists under WSL2 for any of it to detect — per-laptop-vendor fixes, GPU-vendor driver installs, kernel swaps ("Swap in the Panther Lake kernel before anything pulls DKMS modules in", per `install/hardware/all.sh`'s own comment). Neither `install/config/all.sh` nor `install/post-install/all.sh` calls into this directory itself, so it's simply never reached — not something this project has to separately skip. The one exception is `install/post-install/pacman.sh`'s own conditional (`lspci`-gated) sourcing of `install/hardware/pacman.sh` (adds a MacBook-T2-specific pacman repo) — that's the real script's own behavior, left alone rather than special-cased around.
 
-| Script | Decision | Reason |
-|---|---|---|
-| `plymouth.sh` | Skip | No framebuffer boot sequence under WSL2 to splash on. |
-| `sddm.sh` | Skip | No display manager under WSL2 (v1 has no GUI session to greet into anyway). |
-| `hibernation.sh` | Skip | No suspend-to-disk under a WSL2 instance. |
-| `limine-snapper.sh` | Skip | No bootloader to integrate snapshot rollback into. |
+**Kernel/DKMS packages**, via `pacman.conf`'s `IgnorePkg` (set in `build/_inside-container.sh`): `linux linux-firmware linux-headers linux-ptl* linux-t2* linux-firmware-marvell *-dkms`. Verified empirically to not appear anywhere in the real `omarchy` package's dependency closure — this is a pure safety net, not something expected to ever actually trigger, and it's a glob-pattern rule rather than a name list, so it doesn't need updating if upstream adds a new hardware-specific DKMS package later.
 
-Correction: an earlier pass of this audit listed a `default-keyring.sh` here as pacman-keyring initialization. That was wrong on two counts — no such file exists at `install/login/` (confirmed against the pinned commit; it 404s), and the real `install/user/default-keyring.sh` isn't about pacman at all, it initializes a GNOME-keyring/libsecret `Default_keyring` metadata file. See the `install/user/*` table below for its actual (corrected) classification. Pacman's own keyring (`pacman-key --init`/`--populate`) is handled directly in `build/_inside-container.sh`, not by any vendored install script.
+`mkinitcpio` is deliberately **not** in this list, despite looking just as kernel-adjacent as everything else here. A real build attempt with it included failed outright: `limine-mkinitcpio-hook` (a real, unavoidable dependency of the real `omarchy` package) hard-depends on `mkinitcpio`, so ignoring it made `omarchy` itself uninstallable (`unable to satisfy dependency 'mkinitcpio' required by limine-mkinitcpio-hook`). Letting `mkinitcpio` install is harmless: its hooks only ever fire on a `linux`/kernel package transaction, and `linux` itself stays excluded, so those hooks never actually trigger.
 
-## `install/config/*`
+## What's installed but not enabled
 
-| Script | Decision | Reason |
-|---|---|---|
-| `theme-system.sh`, `fix-powerprofilesctl-shebang.sh`, `ssh-command-path.sh`, `ssh-keepalive.sh`, `locate.sh` | Keep, verbatim | Platform-independent, confirmed by reading the actual content (not just the filename) — `fix-powerprofilesctl-shebang.sh` already self-guards on `[[ -f /usr/bin/powerprofilesctl ]]`, `locate.sh` only ever writes `/.snapshots` into `updatedb.conf`'s prune list (harmless whether or not that path exists), the rest are plain system-wide file writes. `theme-system.sh` ran successfully in a real build. |
-| `increase-lockout-limit.sh` | **Not run verbatim** — replaced by `wsl/increase-lockout-limit.sh` | A real build attempt failed here: `sed: can't read /etc/pam.d/sddm-autologin: No such file or directory`. Upstream's script tightens `pam_faillock` in two files — `/etc/pam.d/system-auth` (system-wide, applies regardless of platform) and `/etc/pam.d/sddm-autologin` (only exists because the `sddm` package creates it — not installed in v1). Our replacement keeps the `system-auth` half unchanged and drops the `sddm-autologin` half. |
-| `lockscreen-pam.sh` | Skip | Its entire body is one line: `omarchy-apply-lock`. That's a Hyprland-lock-screen tool — nothing to apply to without a GUI session in v1. |
-| `docker.sh` | Keep, verbatim | Already does the right thing for a security-conscious build without any WSL-specific change needed. It's a no-op file (a bare `:`) whose actual content is upstream's own documented decision **not** to add the install user to the `docker` group by default, because `docker` group membership is root-equivalent (own words: *"membership in the docker group is equivalent to passwordless root: any process in it can `docker run -v /:/host` and rewrite the host as root"*). We inherit this stance unchanged. |
-| `enable-services.sh` | Guard, don't run verbatim | See below — most of the services it enables don't apply; a WSL-specific replacement enables only what does. |
-| `firewall.sh` | Skip by default | Configures `ufw` for a real NIC (default-deny-incoming, LocalSend ports, `ufw-docker` integration). WSL2's network path is host-managed NAT — there's no LAN-facing interface inside the guest for this to protect by default. Trivially re-addable (`packages/generate-manifest.sh` already has `ufw`/`ufw-docker` isolated in one exclusion group) if a concrete threat model calls for it. |
-| `snapper.sh` | Skip | Depends on the excluded `snapper`/Limine snapshot stack. |
+Everything else `omarchy` and `omarchy-base.packages` bring along installs for real: `hyprland`, `sddm`, `quickshell`, `uwsm`, `limine`, `limine-mkinitcpio-hook`, `limine-snapper-sync`, `snapper`, `btrfs-progs`, `xorg-server`, `mesa`, the full GUI/Wayland stack, `efibootmgr`/`efivar`, everything. None of it is excluded from the package set — it's real Omarchy, installed as real Omarchy installs it. The only intervention is a short, explicit override in `build/_inside-container.sh`, applied *after* the real `install/config/enable-services.sh` (part of `install/config/all.sh`) has already run and enabled everything upstream normally enables:
 
-`install/config/enable-services.sh` verbatim (for reference — this is what we're *not* running as-is):
-
-```sh
-systemctl enable cups.service
-systemctl enable cups-browsed.service
-systemctl enable avahi-daemon.service
-systemctl enable linux-modules-cleanup.service
-systemctl enable docker.socket
-systemctl enable systemd-resolved.service
-systemctl enable NetworkManager.service
-systemctl mask NetworkManager-wait-online.service
-systemctl enable power-profiles-daemon.service
-systemctl enable sddm.service
-systemctl enable systemd-oomd.service
+```
+systemctl disable NetworkManager.service    # conflicts with WSL2's own networking
+systemctl disable sddm.service              # no display in v1; would fail/retry every boot otherwise
+systemctl disable cups.service cups-browsed.service avahi-daemon.service  # security: no always-on network-facing daemons by default
 ```
 
-Our replacement (`wsl/enable-services.sh`) enables only `docker.socket` and `systemd-oomd.service` — the two that are platform-independent — and leaves `cups`/`cups-browsed`/`avahi-daemon`/`linux-modules-cleanup`/`NetworkManager`/`power-profiles-daemon`/`sddm` disabled, matching the package exclusions above (their packages aren't even installed). `systemd-resolved.service` is deliberately **not** enabled: WSL2 already auto-generates `/etc/resolv.conf` pointing at the host's DNS on every boot, and running `systemd-resolved` on top would fight that unless `wsl.conf`'s `generateResolvConf=false` is also set — extra moving parts for no v1 benefit. Revisit if a future need (e.g. `systemd-networkd`) requires it.
+`power-profiles-daemon` and everything else upstream enables is left alone — no functional conflict, no security concern, no reason to override it.
 
-## `install/user/*` — none run at build time, as a category (corrected)
+## First-boot provisioning: the real binary, not a rewrite
 
-An earlier pass of this audit classified `theme.sh`, `chromium.sh`, `git.sh`, `xcompose.sh`, `mise-work.sh`, `mise.sh`, and `default-keyring.sh` as "keep, platform-independent." That was wrong: every one of them writes into `$HOME`/`~`, and several (`git.sh`, `xcompose.sh`) read `$OMARCHY_USER_NAME`/`$OMARCHY_USER_EMAIL`. They all assume they're running as, and for, a real already-created user — which is exactly what bare-metal Omarchy does (it runs these per-user scripts after the account exists). At image-build time we're root, in a chroot, and **no user exists yet** — that only happens later, at first boot (`wsl/omarchy-wsl-provision-owner`). Running them at build time wouldn't just be inert, it would silently write into `/root`'s home for a user who's never created, and read empty env vars — wrong, not just useless. Caught by inspecting actual content, not by a failure this time (these particular ones don't happen to error when run as root — they just do the wrong thing quietly, which is worse).
+`/usr/bin/omarchy-provision-owner` — the real ~1100-line binary, shipped in the `omarchy` package — is used completely unmodified. Read in full (not just skimmed) to confirm this is actually safe:
 
-| Script | What it actually does | Why it can't run at build time |
-|---|---|---|
-| `theme.sh` | `mkdir -p ~/.config/omarchy/themes`, calls `omarchy-theme-set "Tokyo Night"`, symlinks a btop theme under `~/.config/btop` | All `$HOME`-scoped |
-| `chromium.sh` | Calls `omarchy-install-chromium-copy-url` / `omarchy-install-chromium-ytdlp` | Chromium isn't installed in v1 (GUI, see `packages/generate-manifest.sh`) regardless |
-| `git.sh` | `git config --global user.name/email` from `$OMARCHY_USER_NAME`/`$OMARCHY_USER_EMAIL` | We already do this correctly, for the real new user, in `wsl/omarchy-wsl-provision-owner` |
-| `xcompose.sh` | Writes `~/.XCompose`, including `$OMARCHY_USER_NAME`/`$OMARCHY_USER_EMAIL` shortcuts | `$HOME`-scoped and env-var-dependent |
-| `mise-work.sh` | Creates `~/Work`, `~/Work/tries`, a per-user `.mise.toml`, installs a Node.js version (from a bundled tarball path that only exists in the real ISO/provisioning contexts, or from the network otherwise) | `$HOME`-scoped; the bundled-tarball paths (`/opt/packages`, `/var/lib/omarchy/provisioning/packages`) don't exist in our build either way |
-| `mise.sh` | Runs `omarchy-mise-install <tool>` for ~15 CLI tools (codex, claude, gh, copilot, playwright, ...), each a real network fetch | `$HOME`-scoped, and far too many external network dependencies to run unattended at build time even if it were user-scoped correctly |
-| `default-keyring.sh` | Initializes `$HOME/.local/share/keyrings/Default_keyring.keyring` | `$HOME`-scoped (this entry was also mis-described in an earlier pass as "pacman keyring" — see the `install/login/*` correction note above) |
+- LUKS re-keying is gated on `[[ -f $PROVISIONING_DIR/luks-key ]] || return 0` — a pure no-op with no staged LUKS key, which there never will be for us. This is the script's own designed behavior for an unencrypted install, not something that needs patching.
+- "Hands off to SDDM" turns out to be nothing more than `Before=display-manager.service` unit *ordering* in the real `.service` file (not used here — see below) — the script itself never execs or blocks on a display manager. Since `sddm.service` is disabled (see above), nothing hands off to anything; the script just finishes.
+- It already self-checks `[[ -f $PROVISIONING_DIR/pending ]] || exit 0` on entry (its own line 25) — safe to invoke directly without a systemd `ConditionPathExists` gate duplicating that check.
+- Its `finalize_user()` step already runs the equivalent of `omarchy-provision-user`, which itself does `source "$OMARCHY_INSTALL/user/all.sh"` — i.e. calling this one binary already correctly runs all the real per-user setup (theme seeding, xdg-user-dirs, dev-tool installs, etc.), with correct `$HOME`/`$OMARCHY_USER_NAME` context, automatically. No separate per-user script wiring needed.
 
-**Open item**: none of this is wired into first-boot provisioning yet either. `wsl/omarchy-wsl-provision-owner` currently only covers what `setup-form.sh` itself asks (username/password/identity/hostname/timezone) plus setting the WSL default user — it does not yet run the per-user setup these scripts represent (theme seeding, `~/Work`, mise-managed dev tools). Tracked as follow-up work, not silently done or silently dropped.
+### Incident: why this isn't triggered by `omarchy-provision-owner.service`
 
-`hardware/asus/*`, `hardware/framework/*`, `hardware/dell/*`, `hardware/fix-nouveau-cursor.sh` (under `install/user/hardware/`): **Skip**, same hardware-category reasoning as `install/hardware/*` above.
-
-## `install/provisioning/*`
-
-| Script | Decision | Reason |
-|---|---|---|
-| `setup-form.sh` | Keep, vendored verbatim (`patches/setup-form.sh`) | Pure bash, no LUKS/SDDM/disk dependency — the actual question-asking/validation logic (username, password, hostname, timezone, keyboard, full name/email) shared between the ISO installer and bare-metal first-boot setup. Exactly what a WSL first-boot flow needs too. |
-| `omarchy-provision-owner` (`bin/omarchy-provision-owner`, ~1100 lines) | **Not vendored** — reimplemented as `wsl/omarchy-wsl-provision-owner` | This script does far more than ask questions: per its own header comment, it *"creates it with the groups system setup recorded, finalizes it offline from the stashed Node tarball, re-keys LUKS from the throwaway install passphrase to the user's password, and hands off to SDDM"* — plus a GRUB-console-matching font-scaling routine and a full ported install-dashboard renderer. LUKS re-keying and SDDM handoff have no WSL2 meaning at all, and the rest is bare-metal presentation logic not worth partially gutting. We reuse only what's genuinely shared (`setup-form.sh`) and write a much smaller, WSL-native driver — see `wsl/omarchy-wsl-provision-owner`. |
-| `omarchy-provision-owner.service` | **Tried, failed on real hardware, replaced** — root-shell-startup hook (`wsl/arm-first-boot.sh`) instead | See the incident write-up just below the table. |
-| `omarchy-system-factory-reset-finish.service` | Skip | Factory-reset flow assumes a real disk to wipe; out of scope. |
-
-### Incident: the first real `wsl --import` + boot attempt
-
-The first pass at this (2026-08-28) vendored upstream's gating pattern (`ConditionPathExists=/var/lib/omarchy/provisioning/pending`, not enabled by default — upstream's own comment: *"Not shipped enabled — a normal install never runs it"*) but kept upstream's TTY binding: `TTYPath=/dev/tty1`, `TTYReset=yes`, `TTYVHangup=yes` (dropping only `Before=display-manager.service`/`Conflicts=getty@tty1.service`, since sddm isn't installed). On a real Windows machine, `wsl --import` + `wsl -d omarchy` came up straight into a root shell with no provisioning prompt at all. Diagnosis (`systemctl status`, `journalctl -u`) showed the unit really did start, then:
+The first pass at this (before the pivot documented in PLAN.md) used the real `omarchy-provision-owner.service` unit — `ConditionPathExists=.../pending`, `TTYPath=/dev/tty1`, `TTYReset=yes`, `TTYVHangup=yes`. On a real `wsl --import` + boot, nothing appeared — the session landed straight into a root shell. `systemctl status`/`journalctl -u` showed the unit really did start, then:
 
 ```
 Main PID: 176 (code=killed, signal=HUP)
 ```
 
-— killed by its own `TTYVHangup=yes` within ~6 seconds. That flag forces a `vhangup(2)` on the tty to reclaim it from whatever was there before (a getty, or SDDM waiting to start) — on bare metal there's a previous session to evict, under WSL there isn't, so it just hung up its own just-started process. Even with that fixed there was no way to confirm the actual interactive `wsl -d` session is even what's attached to `/dev/tty1` — WSL's console attachment model isn't necessarily the classic VT/getty one that unit was written for, and this project has no way to test that assumption directly against WSL's own source.
+`TTYVHangup=yes` forces a `vhangup(2)` on the tty to reclaim it from a previous session (a getty, or SDDM waiting to start) — on bare metal there's a previous session to evict, under WSL there isn't, so it hung up its own just-started process. Even fixed, there's no confirmed guarantee WSL's actual interactive session is what's attached to `/dev/tty1` in the first place.
 
-Rather than keep guessing at systemd/tty semantics, the mechanism was replaced with something that sidesteps the question entirely: a hook in `/root/.bashrc` (+ a `/root/.bash_profile` that sources it, so both login and non-login interactive shells pick it up), guarded on `[[ $- == *i* ]]` (interactive only) and `flock -n` on a dedicated lock file (so two simultaneous `wsl -d` windows run it exactly once). Whatever terminal WSL actually attaches you to, that terminal is the one running the shell startup — no attachment-mechanism assumption required. `patches/omarchy-provision-owner.service.upstream` stays vendored for reference; `wsl/omarchy-wsl-provision-owner.service` (our first attempt) was deleted rather than kept around unused.
+The fix (`wsl/arm-first-boot.sh`) doesn't touch the binary or its `.service` unit at all — it just doesn't use the `.service` unit as the trigger. Instead, a hook in `/root/.bashrc` (+ `.bash_profile` sourcing it, so both login and non-login interactive shells pick it up) calls `/usr/bin/omarchy-provision-owner` directly, guarded on `[[ $- == *i* ]]` (interactive only) and `flock -n` (so two simultaneous `wsl -d` windows run it exactly once). Whatever terminal WSL actually attaches you to, that's the shell whose startup runs it — no attachment-mechanism assumption required. This is a genuine WSL-vs-bare-metal environment difference in *how* the real binary gets invoked, not a modification of the binary or a decision to reimplement it.
 
-## `install/post-install/*`
+### The one genuinely new, WSL-only piece
 
-| Script | Decision | Reason |
-|---|---|---|
-| `pacman.sh` | Guard | Restores `pacman.conf`/mirrorlist from `$OMARCHY_PATH/default/pacman/pacman-<mirror>.conf` and then sources `hardware/pacman.sh` (the T2 repo script, skipped above). Keep the pacman.conf/mirrorlist restore, drop the hardware/pacman.sh call. |
-| `udev.sh` | Keep verbatim | `udevadm control --reload \|\| true` + `udevadm trigger --subsystem-match=power_supply \|\| true` — both already tolerate failure, harmless either way under WSL2. |
-| `localdb.sh` | Keep verbatim | Just `updatedb`, directly useful since `plocate` is in the v1 package manifest. |
+`wsl/apply-default-user.sh`, called right after `omarchy-provision-owner` exits. Bare metal has no concept of "the WSL default user" for a launcher to pick, so there's no upstream file or behavior to defer to here — this finds the newly-created account and writes it into `/etc/wsl.conf`'s `[user] default=`. Everything else about first-boot provisioning is the real thing.
 
-## `bin/omarchy-*` hardware-probing scripts
+## Corrections this pivot resolved for free
 
-~150 runtime scripts (`omarchy-battery-*`, `omarchy-brightness-*`, `omarchy-bluetooth-*`, `omarchy-hw-*`, etc.) are left installed as-is rather than deleted — Omarchy already has to run on desktops with no battery/backlight, so these should already degrade gracefully when the hardware they probe isn't present. **Open item, not yet verified**: run a representative sample of these against the built WSL image during `test/smoke-test.sh` and confirm they no-op rather than error; log any exceptions found here.
+Several things patched around in the previous (hand-curated) version of this build turned out to be artifacts of that same over-exclusion, not genuine WSL incompatibilities:
 
-## Summary of open items
+- `install/config/increase-lockout-limit.sh` previously failed outright (`sed: can't read /etc/pam.d/sddm-autologin`) because the `sddm` package had been excluded from the manifest. Once `sddm` installs for real (as a real dependency of the real `omarchy` package), that file exists, and the real script needs no patching or replacement at all.
+- The earlier "copy `default/` into `/etc/skel`" step — invented, with no upstream equivalent — was the direct cause of a cluttered home directory (system-level dotfile *source* like `limine/`, `sddm/`, `systemd/`, `pacman/`, `libalpm/` landing in a user's home). The real `omarchy` package ships its own correctly-shaped `etc/skel/*` payload; pacstrap lays it down automatically, and `useradd -m` (inside the real `omarchy-provision-owner`) picks it up the normal way. No copying step of our own is needed at all.
 
-- [ ] Empirically verify a sample of hardware-gated `bin/omarchy-*` scripts degrade cleanly with no hardware present.
-- [ ] Confirm whether `tensaku` (image annotator) and `ttfx`/`tobi-try` (uncertain function, kept tentatively in `packages/generate-manifest.sh` for the latter two) need re-classifying once their actual behavior is checked against the built image.
-- [ ] Wire the applicable `install/user/*` per-user setup (theme seeding, `~/Work`, mise-managed dev tools) into `wsl/omarchy-wsl-provision-owner`, running correctly as the newly created user rather than as build-time root. Not done in v1 — see the `install/user/*` section above.
+## Open items
+
+- [ ] Empirically verify a sample of hardware-gated `bin/omarchy-*` runtime scripts (battery, brightness, bluetooth, hw-nvidia, etc.) degrade cleanly with no hardware present — not yet checked against a real running instance.
+- [x] `install/config/snapper.sh` fails as predicted (D-Bus `FileNotFound`) — confirmed harmless, logged, doesn't block the rest of the chain (see above).
+- [ ] Confirm `install/config/firewall.sh` (also run unmodified) doesn't hang waiting on an interactive confirmation prompt under WSL2 — not yet observed either way in a build log.
