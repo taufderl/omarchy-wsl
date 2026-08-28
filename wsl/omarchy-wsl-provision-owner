@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# First-boot owner provisioning for omarchy-wsl. Net-new (not vendored) — see
+# docs/install-audit.md for why the ~1100-line upstream bin/omarchy-provision-owner
+# isn't reused wholesale (LUKS re-keying, SDDM handoff, GRUB-console-matching
+# presentation logic, none of which applies here). What genuinely is shared
+# with bare-metal Omarchy is the question-asking/validation logic itself,
+# vendored verbatim at /usr/share/omarchy-wsl/setup-form.sh (patches/setup-form.sh
+# in this repo) and sourced below unmodified.
+#
+# Gated the same way upstream's own deferred-provisioning path is gated
+# (ConditionPathExists in the .service unit, re-checked here too, matching
+# upstream's own belt-and-suspenders pattern): only runs while
+# /var/lib/omarchy/provisioning/pending exists.
+set -euo pipefail
+
+PROVISIONING_DIR=/var/lib/omarchy/provisioning
+SETUP_FORM=/usr/share/omarchy-wsl/setup-form.sh
+WSL_CONF=/etc/wsl.conf
+
+if (( EUID != 0 )); then
+  echo "omarchy-wsl-provision-owner: must run as root" >&2
+  exit 1
+fi
+
+[[ -f "$PROVISIONING_DIR/pending" ]] || exit 0
+
+# shellcheck source=../patches/setup-form.sh
+source "$SETUP_FORM"
+
+# This machine may already have accounts (re-running after a partial/aborted
+# attempt) — check for real, same override upstream's own bin script makes.
+omarchy_username_taken() { getent passwd "$1" >/dev/null; }
+
+notice() {
+  echo
+  echo "  -> $1"
+  sleep "${2:-1}"
+}
+
+clear
+cat <<'BANNER'
+============================================================
+ Welcome to Omarchy on WSL.
+
+ This first-boot setup creates your user account, the same
+ questions bare-metal Omarchy's installer asks. Press Esc at
+ any prompt to start over, Ctrl+C to abort and try again later.
+============================================================
+BANNER
+echo
+
+run_prompt() {
+  # Runs one omarchy_prompt_* function; on Esc (1) restarts this script from
+  # the top (matching setup-form.sh's documented OMARCHY_FORM_BACK contract),
+  # on Ctrl+C (130) aborts provisioning entirely for this boot.
+  local fn="$1" status
+  "$fn" && status=0 || status=$?
+  if (( status == OMARCHY_FORM_BACK )); then
+    echo "Restarting setup..."
+    sleep 1
+    exec "$0"
+  elif (( status == OMARCHY_FORM_SIGNAL )); then
+    echo
+    echo "Setup cancelled. It will run again next time this WSL instance starts."
+    exit 0
+  elif (( status != 0 )); then
+    echo "omarchy-wsl-provision-owner: unexpected status $status from $fn" >&2
+    exit 1
+  fi
+}
+
+# Note: omarchy_prompt_keyboard is intentionally not called. Keyboard layout
+# on WSL is handled by whatever terminal app on the Windows side is sending
+# already-translated keystrokes over the pty — there is no raw Linux console
+# keymap layer for it to configure the way there is on bare metal.
+run_prompt omarchy_prompt_username
+run_prompt omarchy_prompt_password
+run_prompt omarchy_prompt_identity
+run_prompt omarchy_prompt_hostname
+run_prompt omarchy_prompt_timezone
+
+echo
+echo "Creating user '$username'..."
+useradd -m -G wheel -s /bin/bash "$username"
+echo "$username:$password" | chpasswd
+# root gets the same password too, matching upstream's own stated intent
+# ("Used for user + root") for the single-owner-machine model Omarchy assumes.
+echo "root:$password" | chpasswd
+unset password password_confirmation
+
+if [[ -n "${full_name:-}" ]]; then
+  # runuser -u ... -- (no shell, direct argv) rather than sudo -u or `-l -c`:
+  # sudo's policy isn't configured yet this early in first boot, and passing
+  # $full_name/$email_address through a shell -c string would break (or be
+  # exploitable) on values containing quotes. HOME is set explicitly since
+  # plain (non-login) runuser doesn't switch it, and git config --global
+  # needs it to find the right home directory.
+  runuser -u "$username" -- env HOME="/home/$username" git config --global user.name "$full_name"
+fi
+if [[ -n "${email_address:-}" ]]; then
+  runuser -u "$username" -- env HOME="/home/$username" git config --global user.email "$email_address"
+fi
+
+echo "$hostname" > /etc/hostname
+hostnamectl set-hostname "$hostname" 2>/dev/null || true
+
+if [[ -n "${timezone:-}" ]]; then
+  timedatectl set-timezone "$timezone" 2>/dev/null || true
+fi
+
+# Point WSL at the new user as the default for future launches. WSL only
+# reads this at instance start, so the running session stays as root until
+# the user restarts the instance — told to them explicitly below.
+if grep -q '^\[user\]' "$WSL_CONF" 2>/dev/null; then
+  sed -i "/^\[user\]/,/^\[/{s/^default=.*/default=$username/}" "$WSL_CONF"
+else
+  printf '\n[user]\ndefault=%s\n' "$username" >> "$WSL_CONF"
+fi
+
+rm -f "$PROVISIONING_DIR/pending"
+
+cat <<EOF
+
+============================================================
+ All set, $username.
+
+ Restart this WSL instance once for the new default user to
+ take effect (a WSL platform requirement, not a bug here):
+
+   From Windows/PowerShell:
+     wsl --terminate <distro-name>
+     wsl -d <distro-name>
+============================================================
+
+EOF

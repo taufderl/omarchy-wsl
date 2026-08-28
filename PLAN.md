@@ -2,6 +2,27 @@
 
 This is the contributor-facing build design. It records *why* each decision was made, not just what to do, so scope doesn't silently drift on the next contribution. Read `README.md` first for the user-facing framing.
 
+## Implementation status
+
+The design below is implemented, not just planned. What actually exists in the repo:
+
+- `packages/` — vendored upstream package lists + `generate-manifest.sh` (produces `manifest.txt`, 84 packages, and `excluded-report.txt`), pinned to upstream commit `packages/UPSTREAM_COMMIT`, plus `packages/OMARCHY_KEYRING_PIN` (the sha256-pinned bootstrap trust anchor for the `[omarchy]` pacman repo — see below).
+- `docs/install-audit.md` — the full keep/guard/skip classification, backed by the actual fetched upstream script contents, not guesses.
+- `wsl/` — the WSL integration layer: `wsl.conf`, `enable-services.sh` (replaces upstream's `enable-services.sh`), `omarchy-wsl-provision-owner` + its `.service` unit + `arm-first-boot.sh` (the first-boot owner-provisioning flow, built around the vendored `patches/setup-form.sh` rather than the 1100-line bare-metal `bin/omarchy-provision-owner`, which does LUKS re-keying and SDDM handoff that don't apply — see `docs/install-audit.md`), and `verify-no-boot-artifacts.sh`.
+- `build/build.sh` + `build/_inside-container.sh` — the full containerized pipeline: bootstraps the `[omarchy]` repo's signing key from a pinned, hash-verified package (not "whatever the repo serves today"), pacstraps the manifest, vendors the actual `basecamp/omarchy` checkout onto the image (dotfiles skeleton, `etc/` overlay, `bin/omarchy-*` tools), runs the audited script keep-list via their own real `run_logged`/`helpers/logging.sh`, applies the WSL integration layer, verifies, and tars the result with a checksum + build manifest.
+- `test/smoke-test.sh` — `--target` (offline, against the pacstrap'd tree) and `--live` (run inside the imported WSL2 instance) checks.
+
+**Verified so far**: `./build/build.sh` has been run to completion (Docker, Linux dev machine) and produced a real `dist/omarchy-wsl.tar.gz` (84 packages, ~3.9GB unpacked). `test/smoke-test.sh --target` passes against a fresh extraction of that tarball in an independent container (no boot artifacts, `wsl.conf` correct, first-boot provisioning armed, every manifest package satisfied — including virtual/provides names like `nvim`→`neovim`, which the check initially got wrong as a false positive and was fixed). This is real signal, not a guess — but note what it does *not* cover: nothing in this dev environment can exercise the `--live` checks (they require an actual imported WSL2 instance on Windows), and the build's own script-selection logic was itself corrected mid-verification (see below) rather than being right on the first attempt.
+
+**What the first real build run actually caught** (the reason to trust this more than an unverified plan): `install/config/increase-lockout-limit.sh` run verbatim failed outright (`sed: can't read /etc/pam.d/sddm-autologin`, sddm isn't installed) — replaced by `wsl/increase-lockout-limit.sh`. Separately, closer reading (not a runtime failure this time) showed every `install/user/*` script assumes a real, already-created `$HOME` and env vars like `$OMARCHY_USER_NAME` — none of that exists at build time (root, chroot, no user yet), so none of `install/user/*` runs at build time in v1; see `docs/install-audit.md`'s corrected `install/user/*` section for the full reasoning and the follow-up this creates (wiring the applicable parts into first-boot provisioning is now a tracked open item, not done).
+
+**Not yet done / open**, tracked here and in `docs/install-audit.md`'s own open-items list:
+- The `--live` checks (real WSL2 instance on Windows) haven't been run — do this before calling any specific build genuinely "done."
+- Artifact signing (beyond the sha256 in `build-manifest.json`) isn't wired up yet.
+- The hardware-gated `bin/omarchy-*` empirical-verification open item from `docs/install-audit.md`.
+- Wiring `install/user/*`'s per-user setup (theme seeding, `~/Work`, mise-managed dev tools) into first-boot provisioning.
+- The build re-downloads the full package set from scratch every run (no persistent pacman cache across `--rm` containers) — fine for now, worth a cache volume mount later if iteration speed matters.
+
 ## Goals & non-goals
 
 **Goal:** a builder that produces a WSL2 rootfs tarball running Omarchy's real packages, dotfiles, and `omarchy-*` tooling, differing from bare-metal Omarchy only where WSL2 genuinely requires it, with every such difference documented and justified — not guessed, not silently dropped.
@@ -65,7 +86,7 @@ Go through every script under `install/` in `basecamp/omarchy` and classify it. 
 | `install/login/sddm.sh` | Skip | No display manager needed/wanted; you're already authenticated as your Windows user |
 | `install/login/hibernation.sh` | Skip | No suspend-to-disk under WSL2 |
 | `install/login/limine-snapper.sh` | Skip | No bootloader to integrate snapshot rollback into |
-| `install/login/default-keyring.sh`, `install/hardware/pacman.sh` | Keep | Pacman keyring init is needed regardless of platform |
+| `install/hardware/pacman.sh` | Skip (see `docs/install-audit.md`) | Self-gating and harmless, but Apple-T2-specific; skipped for category consistency, not because it misbehaves. Pacman's own keyring is initialized directly in `build/_inside-container.sh`, not by a vendored install script — there is no `install/login/default-keyring.sh` (an earlier draft of this table assumed one; it doesn't exist upstream, see `docs/install-audit.md`'s correction note). |
 | `install/hardware/*` (asus-rog, dell-xps*, framework16, surface, fix-*, nvidia, bluetooth, network, vulkan, set-wireless-regdom, speaker-tuning) | Skip | Per-vendor laptop hardware and Bluetooth/Wi-Fi hardware don't exist under WSL2; `network.sh`/firewall-adjacent pieces are superseded by the WSL integration layer instead |
 | `install/config/firewall.sh` (ufw) | Skip by default | WSL2's network path is host-managed NAT, not a real NIC to firewall from inside the guest; revisit if a concrete threat model calls for it |
 | `install/config/docker.sh` | Keep, with a guard | Useful under WSL2, but must not conflict with Docker Desktop's own WSL integration if present — guard for that |

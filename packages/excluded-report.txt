@@ -1,0 +1,75 @@
+# Packages present upstream but excluded from omarchy-wsl v1, with category.
+# Regenerate with: ./generate-manifest.sh
+
+aether                         gui-desktop (roadmap)
+asdcontrol                     hardware/network-daemon
+avahi                          hardware/network-daemon
+bluez                          hardware/network-daemon
+bluez-tools                    hardware/network-daemon
+bluez-utils                    hardware/network-daemon
+bolt                           hardware/network-daemon
+brightnessctl                  hardware/network-daemon
+chromium                       gui-desktop (roadmap)
+cups                           hardware/network-daemon
+cups-browsed                   hardware/network-daemon
+cups-filters                   hardware/network-daemon
+cups-pdf                       hardware/network-daemon
+ddcutil                        hardware/network-daemon
+evince                         gui-desktop (roadmap)
+fcitx5-gtk                     gui-desktop (roadmap)
+fcitx5-qt                      gui-desktop (roadmap)
+ffmpegthumbnailer              gui-desktop (roadmap)
+foot                           gui-desktop (roadmap)
+gnome-disk-utility             gui-desktop (roadmap)
+gnome-keyring                  gui-desktop (roadmap)
+gnome-themes-extra             gui-desktop (roadmap)
+gpu-screen-recorder            gui-desktop (roadmap)
+grim                           gui-desktop (roadmap)
+gvfs-mtp                       gui-desktop (roadmap)
+gvfs-nfs                       gui-desktop (roadmap)
+gvfs-smb                       gui-desktop (roadmap)
+hyprland                       gui-desktop (roadmap)
+hyprland-guiutils              gui-desktop (roadmap)
+hyprland-preview-share-picker  gui-desktop (roadmap)
+hyprpicker                     gui-desktop (roadmap)
+hyprsunset                     gui-desktop (roadmap)
+imv                            gui-desktop (roadmap)
+kdenlive                       gui-desktop (roadmap)
+kernel-modules-hook            kernel/bootloader/hardware
+libreoffice-fresh              gui-desktop (roadmap)
+localsend                      gui-desktop (roadmap)
+moonlight-qt                   gui-desktop (roadmap)
+nautilus                       gui-desktop (roadmap)
+nautilus-python                gui-desktop (roadmap)
+networkmanager                 hardware/network-daemon
+nss-mdns                       hardware/network-daemon
+obs-studio                     gui-desktop (roadmap)
+obsidian                       gui-desktop (roadmap)
+omacalc                        gui-desktop (roadmap)
+omacut                         gui-desktop (roadmap)
+omawrite                       gui-desktop (roadmap)
+pinta                          gui-desktop (roadmap)
+plymouth                       gui-desktop (roadmap)
+power-profiles-daemon          hardware/network-daemon
+python-gobject                 gui-desktop (roadmap)
+qt6-imageformats               gui-desktop (roadmap)
+quickshell                     gui-desktop (roadmap)
+sddm                           gui-desktop (roadmap)
+slurp                          gui-desktop (roadmap)
+sushi                          gui-desktop (roadmap)
+system-config-printer          hardware/network-daemon
+tensaku                        gui-desktop (roadmap)
+ttf-ia-writer                  gui-desktop (roadmap)
+udiskie                        gui-desktop (roadmap)
+ufw                            hardware/network-daemon
+ufw-docker                     hardware/network-daemon
+uwsm                           gui-desktop (roadmap)
+wireless-regdb                 hardware/network-daemon
+wl-clipboard                   gui-desktop (roadmap)
+woff2-font-awesome             gui-desktop (roadmap)
+wtype                          gui-desktop (roadmap)
+xdg-desktop-portal-gtk         gui-desktop (roadmap)
+xdg-desktop-portal-hyprland    gui-desktop (roadmap)
+xdg-terminal-exec              gui-desktop (roadmap)
+xournalpp                      gui-desktop (roadmap)
+yaru-icon-theme                gui-desktop (roadmap)

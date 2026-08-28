@@ -1,0 +1,19 @@
+# Pinned bootstrap trust anchor for the [omarchy] pacman repo
+# (https://pkgs.omarchy.org/stable/$arch — see patches/pacman-stable.conf).
+#
+# This package is what establishes trust in the omarchy repo's signing key in
+# the first place (its post_install scriptlet runs `pacman-key --populate
+# omarchy`), so it can't itself be verified by that same key — the standard
+# bootstrap problem every *-keyring package has. We pin its exact filename and
+# sha256 here, recorded from the repo's own signed database
+# (https://pkgs.omarchy.org/stable/x86_64/omarchy.db) at the time this was
+# checked, as the trust anchor: build/build.sh fetches this exact file over
+# HTTPS and refuses to continue if the hash doesn't match, rather than
+# trusting whatever the repo happens to serve at build time.
+#
+# Bump deliberately (verify the new hash against the repo's own signed .db,
+# same way this one was obtained) if omarchy-keyring is ever rotated/updated
+# upstream — never silently.
+
+FILENAME=omarchy-keyring-20251027-1-any.pkg.tar.zst
+SHA256=f4bc258879f493462736f9a072c4f4c7f753eb559f6b346f5bdf8ed816f75f66

@@ -1,0 +1,5 @@
+# Build output only — everything else (including the generated
+# packages/manifest.txt and excluded-report.txt) is committed deliberately,
+# so the resolved package list is reviewable without running anything.
+/dist/*
+!/dist/.gitkeep
