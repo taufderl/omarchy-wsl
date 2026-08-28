@@ -72,6 +72,8 @@ Fixed by moving the trigger to `PROMPT_COMMAND` instead of running inline in `.b
 
 **Related, separate WSL quirk found along the way**: `wsl --terminate <distro>` (stopping just that one distro) was not sufficient to make WSL re-read a `wsl.conf` change — the instance kept starting as root even after the new `[user] default=` was written and the distro terminated and restarted. `wsl --shutdown` (stopping the entire WSL VM) reliably picked it up. `wsl/apply-default-user.sh`'s own printed instructions and the README use `--shutdown`, not `--terminate`, for this reason.
 
+**Confirmed resolved**: a fully fresh `wsl --import` (no manual `omarchy-provision-owner` invocation) subsequently showed the real splash screen automatically, completed the entire flow unattended, and landed as the new user after a `--shutdown`+relaunch — the `PROMPT_COMMAND` fix works. One more red herring along the way while verifying this: an old `omarchy-provision-owner` process left running from *hours* earlier (a leftover from this same debugging session, on the previous import) was still holding the `flock` lock, silently blocking one otherwise-correct fresh attempt — `flock -n` behaved exactly as designed once this was found; it wasn't a code bug, just leftover test-session state.
+
 ### The one genuinely new, WSL-only piece
 
 `wsl/apply-default-user.sh`, called right after `omarchy-provision-owner` exits. Bare metal has no concept of "the WSL default user" for a launcher to pick, so there's no upstream file or behavior to defer to here — this finds the newly-created account and writes it into `/etc/wsl.conf`'s `[user] default=`. Everything else about first-boot provisioning is the real thing.
