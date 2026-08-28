@@ -30,10 +30,15 @@ cat <<EOF
 
 ============================================================
  Restart this WSL instance once for '$username' to become
- the default user (a WSL platform requirement, not a bug):
+ the default user (a WSL platform requirement, not a bug).
+
+ Use a full shutdown, not just --terminate — on a real test,
+ 'wsl --terminate' alone left the instance still starting as
+ root; 'wsl --shutdown' (stops the whole WSL VM, forcing a
+ fresh re-read of wsl.conf) reliably picked up the new default:
 
    From Windows/PowerShell:
-     wsl --terminate <distro-name>
+     wsl --shutdown
      wsl -d <distro-name>
 ============================================================
 

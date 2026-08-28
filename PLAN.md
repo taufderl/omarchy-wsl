@@ -4,7 +4,9 @@ This is the contributor-facing build design. Read `README.md` first for the user
 
 ## Implementation status
 
-Implemented and passing offline verification (`test/smoke-test.sh --target`) as of this revision. **Not yet re-verified with a real `wsl --import`** on Windows since this architecture pivot — that's the next step, same loop as before: build, extract, offline-verify, ship the tarball, import for real, report back.
+**Verified live, end to end, on real Windows/WSL2 hardware.** `wsl --import` + boot works, `omarchy-provision-owner` (the real, unmodified binary) runs and completes the full flow — account creation, hostname/timezone, all the real per-user `install/user/*.sh` setup (including a real `mise`-managed Node.js install) — `/etc/skel` is confirmed clean, and the created user correctly becomes the WSL default after a full `wsl --shutdown` (not just `--terminate`, a separate WSL quirk found along the way — see `docs/install-audit.md`).
+
+One thing found live and fixed after that first successful run: the *automatic* first-boot trigger (root's `.bashrc` hook) didn't fire reliably, even though the real binary and environment were both fine — running it by hand, after the shell had already started, worked perfectly. Root cause and fix (moved the trigger to `PROMPT_COMMAND`, run once the shell is fully interactive) are in `docs/install-audit.md`'s "Incident #3". Rebuilt with that fix; the live-tested account creation above was via the manual-invocation workaround, not yet re-confirmed against a from-scratch image with the `PROMPT_COMMAND` fix baked in — that's the next real-hardware test.
 
 ## Why this is built the way it is
 

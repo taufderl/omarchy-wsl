@@ -53,7 +53,12 @@ wsl --import Omarchy $env:LOCALAPPDATA\Omarchy dist\omarchy-wsl.tar.gz
 wsl -d Omarchy
 ```
 
-On first launch, you'll be asked for a username, password, hostname, and timezone — the real Omarchy owner-setup flow itself, unmodified, just triggered from your shell instead of the ISO installer — then that user is set as the WSL default. **You'll need to restart the WSL instance once** (`wsl --terminate Omarchy`, then `wsl -d Omarchy` again) for the new default user to take effect — this is a WSL platform quirk (the default user is fixed at instance start), not a bug in this project.
+On first launch, you'll be asked for a username, password, hostname, and timezone — the real Omarchy owner-setup flow itself, unmodified, just triggered from your shell instead of the ISO installer — then that user is set as the WSL default. **You'll need a full WSL restart once** for the new default user to take effect — this is a WSL platform quirk (the default user is fixed at instance start), not a bug in this project. Use a full shutdown, not just `--terminate` — on a real test, `wsl --terminate Omarchy` alone left the instance still starting as root; `wsl --shutdown` (stops the whole WSL VM, forcing a fresh re-read of `wsl.conf`) reliably picked it up:
+
+```sh
+wsl --shutdown
+wsl -d Omarchy
+```
 
 ## Project layout
 
