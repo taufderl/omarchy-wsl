@@ -29,9 +29,9 @@ The fix, confirmed by actually downloading and inspecting the real packages from
 
 ```
 [archlinux container, disposable]
-   fetch bootstrap pacman.conf/mirrorlist + IgnorePkg addition  (live, from basecamp/omarchy)
+   fetch bootstrap pacman.conf/mirrorlist + IgnorePkg addition  (from basecamp/omarchy at the pinned release tag)
    bootstrap-trust the [omarchy] repo via pinned omarchy-keyring hash
-   resolve-packages.sh: omarchy-base.packages (live) + omarchy=<pinned version> + base/base-devel/sudo/openssh
+   resolve-packages.sh: omarchy-base.packages (from the pinned omarchy package) + omarchy=<pinned version> + base/base-devel/sudo/openssh
    pacstrap target/
    recreate default/pacman/* at the path install/post-install/pacman.sh expects (not shipped in any package)
    arch-chroot: run the REAL install/config/all.sh, install/post-install/all.sh — unmodified
@@ -44,7 +44,7 @@ The fix, confirmed by actually downloading and inspecting the real packages from
 ### Package resolution (`packages/resolve-packages.sh`)
 
 No vendored/hand-edited package list in this repo. Three inputs:
-1. `omarchy-base.packages`, fetched live from `basecamp/omarchy`'s current default branch — the ISO's own authoritative list, tracked live rather than pinned, so new entries show up automatically.
+1. `omarchy-base.packages`, read out of the pinned `omarchy` package itself (it ships the file at `usr/share/omarchy/install/`) — the ISO's own authoritative list for exactly that release. Upstream's default branch tracks the edge channel and lists packages the stable repo doesn't carry yet, so tracking it broke the build once it ran ahead of stable. Bumping the pin moves the list with it.
 2. `omarchy=$OMARCHY_VERSION` (`packages/OMARCHY_VERSION_PIN`) — the one deliberately pinned thing, for build stability (the project's explicit choice: pin-and-bump over always-latest). Pulls in the entire real dependency graph via pacman itself.
 3. `base`, `base-devel`, `sudo`, `openssh` — verified empirically absent from `omarchy`'s dependency closure; these come from `archinstall`'s base profile on bare metal, which this project doesn't reuse.
 
@@ -69,7 +69,7 @@ The real `/usr/bin/omarchy-provision-owner`, completely unmodified, triggered vi
 - `omarchy=$OMARCHY_VERSION` is pinned (not floating) for build stability/traceability; every build's manifest records exactly what version and branch state it used.
 - No default/blank passwords — `omarchy-provision-owner`'s own real password-setup flow is unchanged.
 - `NetworkManager`/`sddm`/`cups`/`cups-browsed`/`avahi-daemon` are installed but explicitly not enabled (disabled or masked) — no always-on network-facing daemons or conflicting network stacks by default.
-- The final tarball is checksummed; a build manifest records the pinned version, the `omarchy-base.packages` branch state, and the keyring pin used.
+- The final tarball is checksummed; a build manifest records the pinned version, the release tag the bootstrap pacman.conf came from, and the keyring pin used.
 - Threat model: a WSL distro runs with the invoking user's own privileges and reaches the Windows filesystem via `/mnt/c` — this project doesn't create isolation that doesn't exist upstream either, in WSL2 or in Omarchy.
 
 ## Verification / testing

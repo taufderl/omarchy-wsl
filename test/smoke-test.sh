@@ -54,12 +54,11 @@ case "$mode" in
     # flags that as "missing" even though it's genuinely installed and
     # working; `-T` resolves provides correctly and only prints what's truly
     # unsatisfied. (Caught by an actual false-positive in this exact check.)
-    # Re-resolves against whatever's live right now, same as the build did —
-    # if run long after the build (upstream having moved on meanwhile) this
-    # can show false "missing" entries for packages added since; run this
-    # right after a build for a meaningful result.
+    # Resolves against the omarchy-base.packages the target's own omarchy
+    # package installed, so the check is the same whenever it runs.
     resolve_scratch="$(mktemp -d)"
-    bash "$(dirname "${BASH_SOURCE[0]}")/../packages/resolve-packages.sh" "$resolve_scratch" >/dev/null
+    bash "$(dirname "${BASH_SOURCE[0]}")/../packages/resolve-packages.sh" "$resolve_scratch" \
+      "$target/usr/share/omarchy/install/omarchy-base.packages" >/dev/null
     unsatisfied="$(arch-chroot "$target" pacman -T $(cat "$resolve_scratch/manifest.txt") || true)"
     rm -rf "$resolve_scratch"
     if [[ -z "$unsatisfied" ]]; then ok; else bad "not satisfied in target: $unsatisfied"; fi

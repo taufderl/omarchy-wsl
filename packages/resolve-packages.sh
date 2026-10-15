@@ -4,12 +4,12 @@
 # see PLAN.md for why. Three inputs, all live (nothing vendored/hand-edited
 # in this repo):
 #
-#   1. omarchy-base.packages, fetched fresh from basecamp/omarchy's current
-#      default branch — this is the ISO's own authoritative "what else to
-#      pacstrap besides the omarchy package itself" list. Tracking the live
-#      branch (not a pinned commit) means new entries upstream adds show up
-#      automatically on the next build, same as everything else in this repo
-#      that used to be hand-copied.
+#   1. omarchy-base.packages, read out of the pinned omarchy package itself
+#      (it ships the file at usr/share/omarchy/install/). Upstream's default
+#      branch tracks the edge channel and lists packages the stable repo
+#      doesn't carry yet, so only the list that shipped with the pinned
+#      release is guaranteed to match it. Bumping OMARCHY_VERSION_PIN moves
+#      the list along with it.
 #   2. `omarchy=$OMARCHY_VERSION` (packages/OMARCHY_VERSION_PIN) — the one
 #      deliberately pinned thing. Installing this one package pulls in the
 #      entire real dependency graph (hyprland, sddm, limine, snapper,
@@ -27,6 +27,11 @@
 #      listed explicitly here — the one place this script still hand-lists
 #      anything.
 #
+# Usage: resolve-packages.sh <output-dir> [omarchy-base.packages]
+#   Without the second argument, downloads the pinned omarchy package via
+#   pacman (needs the [omarchy] repo configured, as the build container has).
+#   test/smoke-test.sh passes the copy already installed in a target instead.
+#
 # Output: $1/manifest.txt — package names/specs to pass to pacstrap.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,22 +40,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # directory — resolving OUT_DIR before any `cd` (there isn't one) keeps that
 # true; every current caller happens to pass an absolute path, but a relative
 # one would otherwise have silently landed in the wrong place.
-OUT_DIR="${1:?usage: resolve-packages.sh <output-dir>}"
+OUT_DIR="${1:?usage: resolve-packages.sh <output-dir> [omarchy-base.packages]}"
 mkdir -p "$OUT_DIR"
 
 # shellcheck source=./OMARCHY_VERSION_PIN
 source "$SCRIPT_DIR/OMARCHY_VERSION_PIN"
 
-default_branch="$(curl -fsSL https://api.github.com/repos/basecamp/omarchy | \
-  grep -m1 '"default_branch"' | sed -E 's/.*"default_branch": *"([^"]+)".*/\1/')"
-: "${default_branch:?could not resolve the basecamp/omarchy default branch}"
-
-echo "Fetching omarchy-base.packages from basecamp/omarchy@$default_branch" >&2
-curl -fsSL "https://raw.githubusercontent.com/basecamp/omarchy/$default_branch/install/omarchy-base.packages" \
-  -o "$OUT_DIR/omarchy-base.packages.fetched"
+base_list="${2:-}"
+if [[ -z "$base_list" ]]; then
+  pkg_cache="$OUT_DIR/omarchy-pkg"
+  mkdir -p "$pkg_cache"
+  echo "Downloading omarchy=$OMARCHY_VERSION to read its omarchy-base.packages" >&2
+  pacman -Sw --noconfirm -dd --cachedir "$pkg_cache" "omarchy=$OMARCHY_VERSION" >&2
+  pkg_file="$(ls "$pkg_cache"/omarchy-"$OMARCHY_VERSION"-*.pkg.tar.zst)"
+  base_list="$OUT_DIR/omarchy-base.packages"
+  bsdtar -xOf "$pkg_file" usr/share/omarchy/install/omarchy-base.packages > "$base_list"
+fi
+[[ -s "$base_list" ]] || { echo "error: empty or missing omarchy-base.packages: $base_list" >&2; exit 1; }
 
 {
-  grep -vE '^\s*(#|$)' "$OUT_DIR/omarchy-base.packages.fetched"
+  grep -vE '^\s*(#|$)' "$base_list"
   echo "omarchy=$OMARCHY_VERSION"
   echo "base"
   echo "base-devel"

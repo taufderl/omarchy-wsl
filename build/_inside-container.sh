@@ -5,7 +5,7 @@
 #
 # See PLAN.md for the architecture this implements: pacstrap the real
 # `omarchy` pacman package (pinned version) plus the ISO's own
-# omarchy-base.packages (fetched live, not vendored), run the real
+# omarchy-base.packages (shipped inside that package), run the real
 # install/config/*.sh and install/post-install/*.sh orchestration scripts
 # already shipped inside that package — completely unmodified — and apply
 # only the small set of additions that have no bare-metal equivalent at all
@@ -40,11 +40,12 @@ log "Installing bootstrap tools (arch-install-scripts)"
 pacman -S --noconfirm --needed arch-install-scripts
 
 # ---------------------------------------------------------------------------
-# 2. Fetch the real bootstrap pacman.conf/mirrorlist live from
-#    basecamp/omarchy (default/pacman/pacman-stable.conf + mirrorlist-stable
-#    — not vendored/hand-edited in this repo; see packages/resolve-packages.sh
-#    for why that's true of everything else too). This is genuinely necessary
-#    scaffolding, not a curation choice: default/pacman/* isn't shipped in
+# 2. Fetch the real bootstrap pacman.conf/mirrorlist from basecamp/omarchy at
+#    the release tag matching OMARCHY_VERSION_PIN (default/pacman/pacman-stable.conf
+#    + mirrorlist-stable — not vendored/hand-edited in this repo). The default
+#    branch tracks the edge channel, so the tag is what matches the stable
+#    package we install. This is genuinely necessary scaffolding, not a
+#    curation choice: default/pacman/* isn't shipped in
 #    any runtime-installed package (confirmed by inspecting the real
 #    `omarchy` package's contents — verified empirically, see PLAN.md), so
 #    *something* has to bootstrap pacman before any package — including
@@ -61,12 +62,13 @@ pacman -S --noconfirm --needed arch-install-scripts
 #    still holds for a `pacman -Syu` run inside the finished image later,
 #    not just at build time.
 # ---------------------------------------------------------------------------
-default_branch="$(curl -fsSL https://api.github.com/repos/basecamp/omarchy | \
-  grep -m1 '"default_branch"' | sed -E 's/.*"default_branch": *"([^"]+)".*/\1/')"
-log "Fetching bootstrap pacman.conf/mirrorlist from basecamp/omarchy@$default_branch"
-curl -fsSL "https://raw.githubusercontent.com/basecamp/omarchy/$default_branch/default/pacman/pacman-stable.conf" \
+# shellcheck source=../packages/OMARCHY_VERSION_PIN
+source "$REPO/packages/OMARCHY_VERSION_PIN"
+release_tag="v${OMARCHY_VERSION%-*}"
+log "Fetching bootstrap pacman.conf/mirrorlist from basecamp/omarchy@$release_tag"
+curl -fsSL "https://raw.githubusercontent.com/basecamp/omarchy/$release_tag/default/pacman/pacman-stable.conf" \
   -o "$SCRATCH/pacman-stable.conf"
-curl -fsSL "https://raw.githubusercontent.com/basecamp/omarchy/$default_branch/default/pacman/mirrorlist-stable" \
+curl -fsSL "https://raw.githubusercontent.com/basecamp/omarchy/$release_tag/default/pacman/mirrorlist-stable" \
   -o "$SCRATCH/mirrorlist-stable"
 
 # IgnorePkg is only valid inside [options] — appending it at the end of the
@@ -113,7 +115,7 @@ pacman -Sy --noconfirm
 
 # ---------------------------------------------------------------------------
 # 4. Resolve and pacstrap the package set (packages/resolve-packages.sh —
-#    omarchy-base.packages fetched live + the pinned `omarchy=$VERSION` +
+#    omarchy-base.packages from the pinned package + `omarchy=$VERSION` +
 #    base/base-devel/sudo/openssh; see that script for why each is there).
 # ---------------------------------------------------------------------------
 log "Resolving package manifest"
@@ -267,13 +269,11 @@ log "Copying to dist/omarchy-v1.wsl (same bytes, renamed — see comment above)"
 cp "$DIST/omarchy-v1.tar.gz" "$DIST/omarchy-v1.wsl"
 echo "$tarball_sha256" > "$DIST/omarchy-v1.wsl.sha256"
 
-# shellcheck source=../packages/OMARCHY_VERSION_PIN
-source "$REPO/packages/OMARCHY_VERSION_PIN"
 cat > "$DIST/build-manifest.json" <<EOF
 {
   "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "omarchy_version": "$OMARCHY_VERSION",
-  "omarchy_base_packages_branch": "$default_branch",
+  "omarchy_bootstrap_ref": "$release_tag",
   "omarchy_keyring_pin": "$FILENAME",
   "package_spec_count": $(wc -l < "$SCRATCH/manifest.txt"),
   "tarball_sha256": "$tarball_sha256",

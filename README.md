@@ -66,7 +66,7 @@ Then it drops you straight into your new user's shell:
 
 ```
 build/     the containerized build pipeline (pacstrap the real omarchy package → run its real install scripts → WSL integration → .wsl image)
-packages/  package resolution: omarchy-base.packages fetched live + the one pinned omarchy version (no vendored/curated list)
+packages/  package resolution: the one pinned omarchy version, plus the omarchy-base.packages shipped inside it (no vendored/curated list)
 wsl/       the WSL-integration layer that has no Omarchy analogue (wsl.conf, the first-boot provisioning trigger, apply-default-user)
 test/      the post-build verification/smoke-test suite
 docs/      design notes, including the full install-script audit and why the architecture is what it is
