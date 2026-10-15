@@ -14,4 +14,4 @@
 # build fails loudly at the `pacman -S omarchy=$OMARCHY_VERSION` step —
 # bump to whatever's current and rebuild.
 
-OMARCHY_VERSION=4.0.1-1
+OMARCHY_VERSION=4.0.4-1
