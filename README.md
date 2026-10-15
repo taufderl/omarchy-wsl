@@ -70,7 +70,7 @@ packages/  package resolution: the one pinned omarchy version, plus the omarchy-
 wsl/       the WSL-integration layer that has no Omarchy analogue (wsl.conf, the first-boot provisioning trigger, apply-default-user)
 test/      the post-build verification/smoke-test suite
 docs/      design notes, including the full install-script audit and why the architecture is what it is
-.github/   CI: a manual-only workflow that runs the same build in GitHub Actions and uploads omarchy-v1.wsl as a build artifact
+.github/   CI: runs the same build in GitHub Actions on a version tag (or manually) and uploads the .wsl as a build artifact
 PLAN.md    the detailed build design
 ROADMAP.md v1 scope and deferred work (Hyprland desktop, packaging format)
 ```

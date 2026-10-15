@@ -1,17 +1,30 @@
 name: Build omarchy-v1.wsl
 
-# Manual only, deliberately: this pins/pulls real omarchy-org packages and
-# produces a multi-GB artifact, so it shouldn't fire on every push while the
-# builder is still under active development. Run it from the Actions tab
-# ("Run workflow") when you actually want a CI-built artifact.
+# Not on every push: each run pulls real omarchy-org packages and produces a
+# multi-GB artifact. Push a tag matching packages/OMARCHY_VERSION_PIN
+# (v4.0.4-1, or v4.0.4-1.1 for a rebuild of the same version) to build that
+# version, or run it from the Actions tab. The image stays an artifact rather
+# than a release asset because it exceeds GitHub's 2 GiB per-file release limit.
 on:
   workflow_dispatch: {}
+  push:
+    tags: ['v*']
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the tag matches the pinned omarchy version
+        if: github.ref_type == 'tag'
+        run: |
+          source packages/OMARCHY_VERSION_PIN
+          tag="${GITHUB_REF_NAME#v}"
+          if [[ "$tag" != "$OMARCHY_VERSION" && "$tag" != "$OMARCHY_VERSION".* ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match OMARCHY_VERSION_PIN ($OMARCHY_VERSION)"
+            exit 1
+          fi
 
       # GitHub-hosted runners have ~14 GB free by default. This build pulls
       # the archlinux:latest image, ~1GB+ of real omarchy packages, and then
@@ -44,10 +57,10 @@ jobs:
       - name: Upload omarchy-v1.wsl
         uses: actions/upload-artifact@v4
         with:
-          name: omarchy-v1.wsl
+          name: omarchy-${{ github.ref_type == 'tag' && github.ref_name || 'v1' }}.wsl
           path: |
             dist/omarchy-v1.wsl
             dist/omarchy-v1.wsl.sha256
             dist/build-manifest.json
-          retention-days: 14
+          retention-days: ${{ github.ref_type == 'tag' && 90 || 14 }}
           if-no-files-found: error
